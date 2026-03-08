@@ -61,7 +61,69 @@ void main() {
       final fft = dsp.computeFFT(dsp.applyWindow(signal));
       final result = dsp.detectMultiNoteChord(fft);
 
-      expect(result.chordName, contains('C Major'));
+      // After simplification, C Major becomes 'C'
+      expect(result.chordName, equals('C'));
+    });
+
+    test('Chord Classification - E Major (was misclassified as B)', () {
+      // E Major: E4=329.63, G#4=415.30, B4=493.88
+      final freqs = [329.63, 415.30, 493.88];
+      final List<double> signal = List.generate(N, (n) {
+        double val = 0;
+        for (var f in freqs) val += sin(2 * pi * f * n / sampleRate);
+        return val / freqs.length;
+      });
+      final fft = dsp.computeFFT(dsp.applyWindow(signal));
+      // Feed 6 identical frames so the stability filter commits.
+      late MultiNoteDetectionResult result;
+      for (int i = 0; i < 6; i++) result = dsp.detectMultiNoteChord(fft);
+      expect(result.chordName, equals('E'));
+    });
+
+    test('Chord Classification - F Major (was misclassified as C)', () {
+      // F Major: F4=349.23, A4=440.00, C5=523.25
+      final freqs = [349.23, 440.00, 523.25];
+      final List<double> signal = List.generate(N, (n) {
+        double val = 0;
+        for (var f in freqs) val += sin(2 * pi * f * n / sampleRate);
+        return val / freqs.length;
+      });
+      final fft = dsp.computeFFT(dsp.applyWindow(signal));
+      late MultiNoteDetectionResult result;
+      for (int i = 0; i < 6; i++) result = dsp.detectMultiNoteChord(fft);
+      expect(result.chordName, equals('F'));
+    });
+
+    test('Chord Classification - A Major (was misclassified as A minor)', () {
+      // A Major: A4=440.00, C#5=554.37, E5=659.25
+      final freqs = [440.00, 554.37, 659.25];
+      final List<double> signal = List.generate(N, (n) {
+        double val = 0;
+        for (var f in freqs) val += sin(2 * pi * f * n / sampleRate);
+        return val / freqs.length;
+      });
+      final fft = dsp.computeFFT(dsp.applyWindow(signal));
+      late MultiNoteDetectionResult result;
+      for (int i = 0; i < 6; i++) result = dsp.detectMultiNoteChord(fft);
+      expect(result.chordName, equals('A'));
+    });
+
+    test('Stability Filter - chord only committed after stabilityThreshold frames', () {
+      // Generate an E-major FFT
+      final freqs = [329.63, 415.30, 493.88];
+      final List<double> signal = List.generate(N, (n) {
+        double val = 0;
+        for (var f in freqs) val += sin(2 * pi * f * n / sampleRate);
+        return val / freqs.length;
+      });
+      final fft = dsp.computeFFT(dsp.applyWindow(signal));
+
+      // Feed 4 frames (below threshold of 5) – committed chord may still be empty/unknown.
+      for (int i = 0; i < 4; i++) dsp.detectMultiNoteChord(fft);
+      final beforeThreshold = dsp.detectMultiNoteChord(fft); // 5th frame triggers commit
+
+      // After 5 identical frames, the chord should be committed.
+      expect(beforeThreshold.chordName, isNot(equals('Unknown')));
     });
 
     test('Noise Gate - Silence', () {
@@ -93,6 +155,41 @@ void main() {
       expect(db[0][0], closeTo(0.0, 0.001));
       expect(db[0][1], closeTo(-6.02, 0.01)); // 20 * log10(0.5)
       expect(db[0][2], closeTo(-20.0, 0.01)); // 20 * log10(0.1)
+    });
+  });
+
+  group('Chord Simplification - simplifyChordName()', () {
+    test('Major variants collapse to root', () {
+      expect(simplifyChordName('C Major'), equals('C'));
+      expect(simplifyChordName('D Dominant7'), equals('D'));
+      expect(simplifyChordName('D MajorSeventh'), equals('D'));
+      expect(simplifyChordName('D Sus4'), equals('D'));
+      expect(simplifyChordName('D Sus2'), equals('D'));
+      expect(simplifyChordName('E Augmented'), equals('E'));
+    });
+
+    test('Minor/dim variants collapse to root minor', () {
+      expect(simplifyChordName('C Minor'), equals('C minor'));
+      expect(simplifyChordName('A Diminished'), equals('A minor'));
+      expect(simplifyChordName('B MinorSeventh'), equals('B minor'));
+    });
+
+    test('Sharp roots mapped to nearest natural', () {
+      expect(simplifyChordName('C# Major'), equals('C'));
+      expect(simplifyChordName('D# Minor'), equals('E minor'));
+      expect(simplifyChordName('F# Major'), equals('G'));
+      expect(simplifyChordName('G# Minor'), equals('A minor'));
+      expect(simplifyChordName('A# Major'), equals('B'));
+    });
+
+    test('Ambiguous result uses best candidate', () {
+      // e.g. "C Major / C Minor (ambiguous)" → pick C Major → 'C'
+      expect(simplifyChordName('C Major / C Minor (ambiguous)'), equals('C'));
+    });
+
+    test('Unknown input is returned unchanged', () {
+      expect(simplifyChordName('Unknown'), equals('Unknown'));
+      expect(simplifyChordName(''), equals(''));
     });
   });
 }

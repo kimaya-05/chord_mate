@@ -25,6 +25,48 @@ const List<String> noteNames = [
   'F#', 'G', 'G#', 'A', 'A#', 'B'
 ];
 
+/// Maps a detected chord name (e.g. "D MajorSeventh", "C# Minor") to one of
+/// the 14 simplified categories: A, A minor, B, B minor … G, G minor.
+///
+/// Mapping rules:
+///  • Sharp/enharmonic roots → nearest natural note
+///    C# → C,  D# → E,  F# → G,  G# → A,  A# → B
+///  • Minor-type suffixes (Minor*, Dim*, Diminished*) → "<root> minor"
+///  • All other suffixes (Major, Dominant7, MajorSeventh, Sus*, Augmented,
+///    ambiguous …) → "<root>"  (treated as major)
+///  • "Unknown" / unrecognised strings → returned unchanged
+String simplifyChordName(String rawName) {
+  if (rawName.isEmpty || rawName == 'Unknown') return rawName;
+
+  // If result contains ambiguous marker just take everything before " / "
+  String name = rawName.contains(' / ') ? rawName.split(' / ').first.trim() : rawName;
+
+  // Extract root note (handles sharps: "C#", "G#", etc.)
+  final rootMatch = RegExp(r'^([A-G]#?)').firstMatch(name);
+  if (rootMatch == null) return rawName;
+  String root = rootMatch.group(1)!;
+
+  // Map sharp roots to nearest natural note
+  const Map<String, String> sharpToNatural = {
+    'C#': 'C',
+    'D#': 'E',
+    'F#': 'G',
+    'G#': 'A',
+    'A#': 'B',
+  };
+  root = sharpToNatural[root] ?? root;
+
+  // Extract the chord type portion (everything after the root)
+  String type = name.substring(rootMatch.end).trim();
+
+  // Decide major vs minor
+  bool isMinor = type.startsWith('Minor') ||
+      type.startsWith('Dim') ||
+      type.startsWith('Diminished');
+
+  return isMinor ? '$root minor' : root;
+}
+
 const double ln2 = 0.693147180559945;
 const double a4Frequency = 440.0;
 const int a4Midi = 69;
@@ -116,10 +158,46 @@ class DSPEngine {
   late double _recentPeakLevel = 0.0;
   late double _currentGain = 1.0;
 
+  // Chromagram & smoothing state
+  final int chromaBins = 12;
+  final int smoothingWindowMs;
+  final double chromaThreshold; // relative threshold (0..1)
+  final List<List<double>> _chromaBuffer = [];
+  final bool enableDebugLogs;
+
+  // Chroma / chord detection frequency focus (acoustic guitar friendly)
+  // - Below ~55 Hz is mostly rumble; above a few kHz is mostly pick noise/brightness
+  static const double _minChordFreqHz = 55.0;
+  static const double _maxChordFreqHz = 2200.0;
+  static const int _maxChromaPeaks = 36;
+  static const int _harmonicFoldMax = 6;
+  
+  // Chord stability tracking & latency measurement
+  String _lastChordName = '';
+  int _chordStabilityCounter = 0;
+  final int stabilityThreshold = 3;  // require 3 consecutive same chords
+  double _lastChordScore = 0.0;
+  double _lastProcessingLatencyMs = 0.0;
+
+  double get lastProcessingLatencyMs => _lastProcessingLatencyMs;
+
+  void _log(String msg) {
+    if (enableDebugLogs) print('[DSPEngine] $msg');
+  }
+  int get _chromaBufferMaxFrames {
+    // frames = smoothingMs / (hopSize / sampleRate * 1000)
+    double hopMs = hopSize / sampleRate * 1000.0;
+    int frames = (smoothingWindowMs / max(hopMs, 1)).round();
+    return max(1, frames);
+  }
+
   DSPEngine({
     this.sampleRate = 44100,
-    this.frameSize = 2048,
-    this.hopSize = 512,
+    this.frameSize = 4096,
+    this.hopSize = 1024,
+    this.smoothingWindowMs = 300,
+    this.chromaThreshold = 0.07, // Lowered threshold for better third detection
+    this.enableDebugLogs = false,
   });
 
   /// Validates signal before processing
@@ -181,7 +259,10 @@ class DSPEngine {
 
     // Extract the frame
     List<double> frame = audioData.sublist(0, frameSize);
-    
+
+    // ── Start latency timer ──────────────────────────────────────────────────
+    final sw = Stopwatch()..start();
+
     // Check if we need gain adjustment BEFORE windowing
     bool needsGain = _needsGainAdjustment(frame);
     
@@ -196,11 +277,25 @@ class DSPEngine {
     
     // Compute FFT for immediate use if needed
     List<double> fft = computeFFT(windowed);
+    // Log raw amplitude values
+    double rawPeak = frame.map((s) => s.abs()).reduce((a, b) => a > b ? a : b);
+    double rawRmsLog = sqrt(frame.fold<double>(0.0, (a, b) => a + b * b) / frame.length);
+    _log('RawPeak=${rawPeak.toStringAsFixed(5)}, RawRMS=${rawRmsLog.toStringAsFixed(5)}');
     
     // Detect fundamental frequency (optional, can be done later)
     double fundamentalFreq = 0;
     if (fft.isNotEmpty) {
       fundamentalFreq = findFundamentalHPS(fft);
+    }
+
+    // Log FFT peaks (top 5)
+    if (fft.isNotEmpty) {
+      List<PeakData> fftPeaks = findPeaks(fft, threshold: 0.02);
+      int topN = min(5, fftPeaks.length);
+      if (topN > 0) {
+        String peaks = fftPeaks.take(topN).map((p) => '${p.frequency.toStringAsFixed(1)}Hz(${p.magnitude.toStringAsFixed(3)})').join(', ');
+        _log('FFT Peaks: $peaks');
+      }
     }
 
     // Simple noise gate: if raw RMS is below threshold, zero the frame
@@ -209,6 +304,10 @@ class DSPEngine {
     if (frame.isNotEmpty) {
       rawRms = sqrt(frame.fold<double>(0.0, (a, b) => a + b * b) / frame.length);
     }
+
+    // ── Stop timer and record latency ────────────────────────────────────────
+    sw.stop();
+    _lastProcessingLatencyMs = sw.elapsedMicroseconds / 1000.0;
 
     if (rawRms < noiseGateThreshold) {
       // Return an explicitly zeroed frame for downstream tests/consumers
@@ -727,7 +826,7 @@ List<PeakData> findPeaksHPS(
         });
 
         if (match) {
-          return '$root ${entry.key}';
+          return simplifyChordName('$root ${entry.key}');
         }
       }
     }
@@ -735,27 +834,326 @@ List<PeakData> findPeaksHPS(
     return 'Unknown';
   }
 
-  /// End-to-end chord detection from spectrum
+  /// Convert a single magnitude spectrum to a 12-bin chroma vector
+  List<double> _spectrumToChroma(List<double> magnitudes) {
+    List<double> chroma = List.filled(chromaBins, 0.0);
+    if (magnitudes.isEmpty) return chroma;
+
+    // Peak-based HPCP style chroma is much more robust on acoustic guitar
+    // (reduces overtone dominance vs summing every FFT bin).
+    final spec = _smoothSpectrum(magnitudes);
+    final maxMag = spec.reduce((a, b) => a > b ? a : b);
+    if (maxMag <= 0) return chroma;
+
+    // Focus on prominent spectral peaks within a musically relevant band.
+    // A dynamic threshold keeps behavior stable across different mic gains.
+    final peaks = findPeaks(spec, threshold: 0.02)
+        .where((p) => p.frequency >= _minChordFreqHz && p.frequency <= _maxChordFreqHz)
+        .take(_maxChromaPeaks)
+        .toList();
+
+    if (peaks.isEmpty) return chroma;
+
+    // Helper: add energy to chroma with fractional pitch interpolation
+    void addToChroma(double frequency, double energy) {
+      if (frequency <= 0 || energy <= 0) return;
+
+      // Convert to fractional MIDI, then distribute between adjacent pitch classes.
+      final p = a4Midi + 12.0 * (log(frequency / a4Frequency) / ln2);
+      final nearest = p.roundToDouble();
+      final delta = (p - nearest).clamp(-0.5, 0.5); // semitones
+
+      int i0 = (nearest.toInt() % 12 + 12) % 12;
+      int i1 = ((i0 + (delta >= 0 ? 1 : -1)) % 12 + 12) % 12;
+
+      final w1 = (delta.abs() * 2.0).clamp(0.0, 1.0);
+      final w0 = 1.0 - w1;
+      chroma[i0] += energy * w0;
+      chroma[i1] += energy * w1;
+    }
+
+    // Harmonic folding:
+    // For each observed peak at f, also vote for f/h (h=2..N) so strong harmonics
+    // still contribute back to the implied fundamental pitch class.
+    for (final p in peaks) {
+      // Mild magnitude compression so one very loud partial doesn't dominate.
+      final mag = pow(p.magnitude / maxMag, 0.6).toDouble();
+      if (mag <= 0) continue;
+
+      // Downweight very high peaks (mostly timbre/noise) even if they're loud.
+      final highFreqPenalty = 1.0 / (1.0 + (p.frequency / 1200.0));
+      final baseEnergy = mag * highFreqPenalty;
+
+      // Always include the direct vote (h=1).
+      addToChroma(p.frequency, baseEnergy);
+
+      // Only fold if the peak is plausibly a harmonic (above low fundamentals).
+      if (p.frequency >= 160.0) {
+        for (int h = 2; h <= _harmonicFoldMax; h++) {
+          final f0 = p.frequency / h;
+          if (f0 < _minChordFreqHz) break;
+          // 1/h decay is key: many overtones should not overpower actual fundamentals.
+          final foldEnergy = baseEnergy * (1.0 / h);
+          addToChroma(f0, foldEnergy);
+        }
+      }
+    }
+
+    // L1 normalize (stable for thresholding + averaging)
+    final sum = chroma.reduce((a, b) => a + b);
+    if (sum > 0) {
+      for (int i = 0; i < chroma.length; i++) {
+        chroma[i] /= sum;
+      }
+    }
+
+    return chroma;
+  }
+
+  /// Simple 3-point smoothing kernel across frequency axis
+  List<double> _smoothSpectrum(List<double> mags) {
+    if (mags.length < 3) return List.from(mags);
+    List<double> out = List.filled(mags.length, 0.0);
+    for (int i = 0; i < mags.length; i++) {
+      double left = i > 0 ? mags[i - 1] * 0.25 : 0.0;
+      double center = mags[i] * 0.5;
+      double right = i < mags.length - 1 ? mags[i + 1] * 0.25 : 0.0;
+      out[i] = left + center + right;
+    }
+    return out;
+  }
+
+  void _pushChromaFrame(List<double> chroma) {
+    _chromaBuffer.add(chroma);
+    int maxFrames = _chromaBufferMaxFrames;
+    while (_chromaBuffer.length > maxFrames) {
+      _chromaBuffer.removeAt(0);
+    }
+  }
+
+  List<double> _averageChroma() {
+    if (_chromaBuffer.isEmpty) return List.filled(chromaBins, 0.0);
+    List<double> avg = List.filled(chromaBins, 0.0);
+    for (var c in _chromaBuffer) {
+      for (int i = 0; i < chromaBins; i++) {
+        avg[i] += c[i];
+      }
+    }
+    double denom = _chromaBuffer.length.toDouble();
+    for (int i = 0; i < chromaBins; i++) {
+      avg[i] /= denom;
+    }
+
+    // Apply relative threshold to ignore weak classes
+    double maxVal = avg.reduce((a, b) => a > b ? a : b);
+    if (maxVal <= 0) return avg;
+    // Lower threshold for third interval (major/minor)
+    for (int i = 0; i < chromaBins; i++) {
+      // Check if this bin is a major or minor third above a strong root
+      bool isThird = false;
+      for (int root = 0; root < chromaBins; root++) {
+        if (avg[root] >= maxVal * chromaThreshold) {
+          int majorThird = (root + 4) % 12;
+          int minorThird = (root + 3) % 12;
+          if (i == majorThird || i == minorThird) isThird = true;
+        }
+      }
+      double threshold = isThird ? chromaThreshold * 0.5 : chromaThreshold;
+      if (avg[i] < maxVal * threshold) avg[i] = 0.0;
+    }
+    // Re-normalize after threshold
+    double s = avg.reduce((a, b) => a + b);
+    if (s > 0) {
+      for (int i = 0; i < chromaBins; i++) {
+        avg[i] /= s;
+      }
+    }
+    return avg;
+  }
+
+  /// Match chord using chroma similarity with weighted importance on the third
+  /// Weights: root=1.0, third=1.5, fifth=1.0, seventh=0.8
+  Map<String, dynamic> _classifyChordFromChroma(List<double> originalChroma, {int? bassPitchClass}) {
+    // Return { 'name': String, 'score': double }
+    if (originalChroma.every((c) => c <= 0)) return {'name': 'Unknown', 'score': 0.0};
+
+    // Copy to avoid mutating caller data
+    final chroma = List<double>.from(originalChroma);
+
+    // Use L2 norm for cosine similarity.
+    final chromaNorm = sqrt(chroma.map((c) => c * c).reduce((a, b) => a + b));
+    if (chromaNorm == 0) return {'name': 'Unknown', 'score': 0.0};
+
+    String bestName = 'Unknown';
+    double bestScore = 0.0;
+
+    // For each possible root and template, compute a weighted score that:
+    // - rewards chord-tone energy
+    // - penalizes non-chord tones (common on acoustic guitar due to overtones/noise)
+    // - applies a light bass-note prior from low-frequency peaks
+    for (int root = 0; root < 12; root++) {
+      for (var entry in chordTemplates.entries) {
+        final intervals = entry.value;
+
+        // Interval-based weights (avoid treating sus tones like a "third")
+        double intervalWeight(int interval) {
+          if (interval == 0) return 1.15; // root
+          if (interval == 3 || interval == 4) return 1.55; // minor/major third
+          if (interval == 7) return 1.05; // fifth
+          if (interval == 10 || interval == 11) return 0.85; // 7th
+          if (interval == 2 || interval == 5) return 1.05; // sus2 / sus4
+          if (interval == 6 || interval == 8) return 0.95; // dim/aug tone
+          return 0.9;
+        }
+
+        final chordToneMask = List<double>.filled(12, 0.0);
+        double wSum = 0.0;
+        for (final interval in intervals) {
+          final idx = (root + interval) % 12;
+          final w = intervalWeight(interval);
+          chordToneMask[idx] = max(chordToneMask[idx], w);
+          wSum += w;
+        }
+        if (wSum <= 0) continue;
+
+        double positive = 0.0;
+        double outside = 0.0;
+        for (int i = 0; i < 12; i++) {
+          final v = chroma[i];
+          if (v <= 0) continue;
+          final w = chordToneMask[i];
+          if (w > 0) {
+            positive += v * w;
+          } else {
+            outside += v;
+          }
+        }
+
+        // Normalize positive by chord weight sum so different template sizes compare fairly.
+        double score = positive / wSum;
+
+        // Penalize non-chord tones (helps acoustic guitar where high harmonics smear chroma).
+        const double outsidePenalty = 0.40;
+        score -= outsidePenalty * outside;
+
+        // Bass prior: if we have a bass pitch class estimate, gently reward
+        // templates whose root (or chord tone) matches it.
+        if (bassPitchClass != null) {
+          if (bassPitchClass == root) {
+            score += 0.06;
+          } else if (chordToneMask[bassPitchClass] > 0) {
+            score += 0.03;
+          }
+        }
+
+        // A small prior towards simple triads for stability.
+        final type = entry.key;
+        if (type == 'Major' || type == 'Minor') score += 0.015;
+
+        // Convert to a [0..1] similarity-like value for downstream thresholds.
+        // Use cosine similarity as a secondary stabilizer (keeps old behavior shape).
+        double dot = 0.0;
+        double tplEnergy = 0.0;
+        for (int i = 0; i < 12; i++) {
+          final w = chordToneMask[i];
+          if (w <= 0) continue;
+          dot += chroma[i] * w;
+          tplEnergy += w * w;
+        }
+        final tplNorm = sqrt(tplEnergy);
+        final cosSim = (tplNorm > 0) ? (dot / (chromaNorm * tplNorm)) : 0.0;
+        final sim = (0.65 * cosSim + 0.35 * score).clamp(0.0, 1.0);
+
+        if (sim > bestScore) {
+          bestScore = sim;
+          bestName = '${noteNames[root]} ${entry.key}';
+        }
+      }
+    }
+    return {'name': bestName, 'score': bestScore.clamp(0.0, 1.0)};
+  }
+
+  int? _estimateBassPitchClass(List<double> magnitudes) {
+    if (magnitudes.isEmpty) return null;
+    final maxMag = magnitudes.reduce((a, b) => a > b ? a : b);
+    if (maxMag <= 0) return null;
+
+    // Find strongest peak in low-frequency band (bass region).
+    // Using peaks avoids being tricked by broadband noise.
+    final bassPeaks = findPeaks(magnitudes, threshold: 0.03)
+        .where((p) => p.frequency >= 55.0 && p.frequency <= 260.0)
+        .toList();
+    if (bassPeaks.isEmpty) return null;
+    bassPeaks.sort((a, b) => b.magnitude.compareTo(a.magnitude));
+
+    final f = bassPeaks.first.frequency;
+    if (f <= 0) return null;
+    final semitones = 12 * (log(f / a4Frequency) / ln2);
+    final midi = (a4Midi + semitones).round();
+    return ((midi % 12) + 12) % 12;
+  }
+
+  /// End-to-end chord detection from spectrum with latency measurement and stability filtering
   MultiNoteDetectionResult detectMultiNoteChord(List<double> magnitudes) {
+    // Measure processing latency
+    var startTime = DateTime.now();
+    
+    // New chroma-based pipeline:
     if (magnitudes.isEmpty) return MultiNoteDetectionResult.empty();
 
-    List<double> fundamentalFreqs = detectMultipleFrequencies(
-      magnitudes,
-      maxNotes: 6,
-      useHPS: true,
-    );
+    // Convert current spectrum to chroma and push into temporal buffer
+    List<double> chromaFrame = _spectrumToChroma(magnitudes);
+    _pushChromaFrame(chromaFrame);
 
-    if (fundamentalFreqs.isEmpty) return MultiNoteDetectionResult.empty();
+    // Average recent chroma frames (smoothing over time)
+    List<double> avgChroma = _averageChroma();
 
-    Set<String> pitchClasses = getUniquePitchClasses(fundamentalFreqs);
-    String chordName = classifyChordFromNotes(pitchClasses);
-    double confidence =
-        _calculateMultiNoteConfidence(magnitudes, fundamentalFreqs);
+    // If nothing above threshold, return empty
+    double totalEnergy = avgChroma.reduce((a, b) => a + b);
+    if (totalEnergy <= 0) return MultiNoteDetectionResult.empty();
+
+    // Get detected pitch classes (non-zero chroma bins)
+    List<String> detected = [];
+    for (int i = 0; i < avgChroma.length; i++) {
+      if (avgChroma[i] > 0) detected.add(noteNames[i]);
+    }
+
+    _log('ChromaFrame: ${chromaFrame.map((c) => c.toStringAsFixed(3)).join(', ')}');
+    _log('AvgChroma: ${avgChroma.map((c) => c.toStringAsFixed(3)).join(', ')}');
+    _log('Detected pitch classes: ${detected.join(', ')}');
+
+    // Match chord by weighted similarity
+    final bassPc = _estimateBassPitchClass(magnitudes);
+    var match = _classifyChordFromChroma(avgChroma, bassPitchClass: bassPc);
+    String chordName = match['name'] ?? 'Unknown';
+    double confidence = (match['score'] is double) ? match['score'] : 0.0;
+
+    // Apply stability filtering to prevent flickering
+    String finalChordName = chordName;
+    if (chordName == _lastChordName && confidence >= _lastChordScore * 0.9) {
+      // Same chord, increment stability counter
+      _chordStabilityCounter++;
+      if (_chordStabilityCounter < stabilityThreshold) {
+        // Haven't reached stability threshold yet, keep last chord
+        finalChordName = _lastChordName;
+      }
+    } else {
+      // Different chord detected, reset counter
+      _chordStabilityCounter = 1;
+      _lastChordName = chordName;
+      _lastChordScore = confidence;
+    }
+
+    _log('ChordDecision: $finalChordName (score: ${confidence.toStringAsFixed(3)}, stability: $_chordStabilityCounter/$stabilityThreshold)');
+
+    // Measure processing latency
+    _lastProcessingLatencyMs = DateTime.now().difference(startTime).inMilliseconds.toDouble();
+    _log('ProcessingLatency: ${_lastProcessingLatencyMs.toStringAsFixed(2)} ms');
 
     return MultiNoteDetectionResult(
-      detectedNotes: List<String>.from(pitchClasses),
-      fundamentalFrequencies: fundamentalFreqs,
-      chordName: chordName,
+      detectedNotes: detected,
+      fundamentalFrequencies: [],
+      chordName: simplifyChordName(finalChordName),
       confidence: confidence,
     );
   }
@@ -782,6 +1180,7 @@ List<PeakData> findPeaksHPS(
     );
   }
 
+  // ignore: unused_element
   double _calculateMultiNoteConfidence(
     List<double> magnitudes,
     List<double> frequencies,

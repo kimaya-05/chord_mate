@@ -25,11 +25,12 @@ class _DspTestPageState extends State<DspTestPage> {
   // Live results
   String _detectedChord = '';
   String _detectedNote = '';
+  String _mlPrediction = '';
   double _fundamentalFreq = 0;
   double _rmsLevel = 0;
   double _confidence = 0;
   int _framesProcessed = 0;
-  final int _latencyMs = 0;
+  double _latencyMs = 0;
 
   @override
   void initState() {
@@ -85,17 +86,18 @@ class _DspTestPageState extends State<DspTestPage> {
   void _onDSPResult(DSPResult result) {
     if (!mounted) return;
 
-    // Update UI (throttle to every 4th frame to keep UI responsive)
-    if (result.framesProcessed % 4 == 0) {
-      setState(() {
-        _rmsLevel = result.rmsLevel;
-        _fundamentalFreq = result.fundamentalFreq;
-        _detectedNote = result.note;
-        _detectedChord = result.chord;
-        _confidence = result.confidence;
-        _framesProcessed = result.framesProcessed;
-      });
-    }
+    // Update UI on every result – stability / flicker prevention is now
+    // handled entirely inside the DSP engine (candidate + committed filter).
+    setState(() {
+      _rmsLevel = result.rmsLevel;
+      _fundamentalFreq = result.fundamentalFreq;
+      _detectedNote = result.note;
+      _detectedChord = result.chord;
+      _mlPrediction = result.mlPrediction;
+      _confidence = result.confidence;
+      _framesProcessed = result.framesProcessed;
+      _latencyMs = result.latencyMs;
+    });
   }
 
   // ── UI ───────────────────────────────────────────────────────────────────
@@ -141,9 +143,17 @@ class _DspTestPageState extends State<DspTestPage> {
 
             // Chord
             _buildLabeledRow(
-              'Chord',
+              'DSP Chord',
               Text(_detectedChord,
-                  style: const TextStyle(fontSize: 24, fontWeight: FontWeight.bold)),
+                  style: const TextStyle(fontSize: 24, fontWeight: FontWeight.bold, color: Colors.blue)),
+            ),
+            const SizedBox(height: 12),
+
+             // ML Chord
+            _buildLabeledRow(
+              'ML Chord',
+              Text(_mlPrediction,
+                  style: const TextStyle(fontSize: 24, fontWeight: FontWeight.bold, color: Colors.green)),
             ),
             const SizedBox(height: 12),
 
@@ -162,10 +172,11 @@ class _DspTestPageState extends State<DspTestPage> {
                   style: const TextStyle(fontSize: 16, color: Colors.grey)),
             ),
 
-            // Latency (display only to use the field)
+            // Latency
             _buildLabeledRow(
               'Latency',
-              Text('$_latencyMs ms', style: const TextStyle(fontSize: 16, color: Colors.grey)),
+              Text('${_latencyMs.toStringAsFixed(1)} ms',
+                  style: const TextStyle(fontSize: 16, color: Colors.grey)),
             ),
 
             const Spacer(),
