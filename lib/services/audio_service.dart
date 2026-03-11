@@ -24,6 +24,7 @@ class DSPResult {
   final double latencyMs;
   final String mlPrediction;
   final double mlConfidence;
+  final OctaveResult? octaveResult; // New field for targets
 
   DSPResult({
     required this.rmsLevel,
@@ -35,6 +36,7 @@ class DSPResult {
     this.latencyMs = 0.0,
     this.mlPrediction = '',
     this.mlConfidence = 0.0,
+    this.octaveResult,
   });
 }
 
@@ -55,7 +57,7 @@ class AudioService {
   int _framesProcessed = 0;
   
   // ML spectrogram buffering
-  List<List<double>> _melSpectrogramBuffer = [];
+  final List<List<double>> _melSpectrogramBuffer = [];
   static const int melBands = 64;
   static const int spectrogramFrames = 128;
   
@@ -65,6 +67,10 @@ class AudioService {
   // Last ML prediction state for UI persistence
   String _lastMLPrediction = 'Unknown';
   double _lastMLConfidence = 0.0;
+  
+  // Target tracking for Octave Practice Session
+  String? _targetLow;
+  String? _targetHigh;
 
   AudioService() {
     // ensure streaming buffer matches DSP engine frame/hop sizes
@@ -161,6 +167,11 @@ class AudioService {
             chordResult = _dsp.detectMultiNoteChord(frame.fftData!);
           }
 
+          OctaveResult? octaveRes;
+          if (_targetLow != null && _targetHigh != null && frame.fftData != null && frame.fftData!.isNotEmpty) {
+            octaveRes = _dsp.detectOctaveFromSpectrum(frame.fftData!, targetLow: _targetLow!, targetHigh: _targetHigh!);
+          }
+
           // Compute ML prediction from FFT data
           if (frame.fftData != null && frame.fftData!.isNotEmpty) {
             // Convert FFT to mel-spectrogram frame (unnormalized power dB)
@@ -217,6 +228,7 @@ class AudioService {
             latencyMs: _dsp.lastProcessingLatencyMs,
             mlPrediction: _lastMLPrediction,
             mlConfidence: _lastMLConfidence,
+            octaveResult: octaveRes,
           ));
         }
       }
@@ -280,21 +292,21 @@ class AudioService {
       double melLowerEdge = melLow + (melHigh - melLow) * m / (melBands + 1);
       double melUpperEdge = melLow + (melHigh - melLow) * (m + 2) / (melBands + 1);
 
-      double freq_center = _melToHertz(melCenter);
-      double freq_lower = _melToHertz(melLowerEdge);
-      double freq_upper = _melToHertz(melUpperEdge);
+      double freqCenter = _melToHertz(melCenter);
+      double freqLower = _melToHertz(melLowerEdge);
+      double freqUpper = _melToHertz(melUpperEdge);
 
-      int bin_center = _frequencyToBin(freq_center);
-      int bin_lower = _frequencyToBin(freq_lower);
-      int bin_upper = _frequencyToBin(freq_upper);
+      int binCenter = _frequencyToBin(freqCenter);
+      int binLower = _frequencyToBin(freqLower);
+      int binUpper = _frequencyToBin(freqUpper);
 
       double energy = 0.0;
-      for (int k = bin_lower; k < bin_upper && k < fftMagnitudes.length; k++) {
+      for (int k = binLower; k < binUpper && k < fftMagnitudes.length; k++) {
         double weight = 0.0;
-        if (k < bin_center) {
-          weight = (k - bin_lower) / max(1, bin_center - bin_lower);
+        if (k < binCenter) {
+          weight = (k - binLower) / max(1, binCenter - binLower);
         } else {
-          weight = (bin_upper - k) / max(1, bin_upper - bin_center);
+          weight = (binUpper - k) / max(1, binUpper - binCenter);
         }
         energy += weight * (fftMagnitudes[k] * fftMagnitudes[k]);
       }
@@ -332,11 +344,6 @@ class AudioService {
     return 700 * (pow(10, mel / 2595) - 1);
   }
 
-  /// Get frequency from FFT bin index
-  double _frequencyFromBin(int bin) {
-    return bin * sampleRate / _dsp.frameSize;
-  }
-
   /// Convert frequency to FFT bin index
   int _frequencyToBin(double frequency) {
     return (frequency * _dsp.frameSize / sampleRate).toInt();
@@ -362,6 +369,11 @@ class AudioService {
   bool get isRecording => _isRecording;
   bool get isInitialized => _isInitialized;
   int get framesProcessed => _framesProcessed;
+
+  void setTargetOctave(String? low, String? high) {
+    _targetLow = low;
+    _targetHigh = high;
+  }
 
   /// Reset DSP engine state
   void resetDSP() {

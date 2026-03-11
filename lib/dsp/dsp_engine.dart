@@ -165,6 +165,10 @@ class DSPEngine {
   final List<List<double>> _chromaBuffer = [];
   final bool enableDebugLogs;
 
+  // Rolling window for octave detection (fundamental + octave harmonic)
+  final int octaveWindowMs;
+  final List<_OctavePair> _octaveHistory = [];
+
   // Chroma / chord detection frequency focus (acoustic guitar friendly)
   // - Below ~55 Hz is mostly rumble; above a few kHz is mostly pick noise/brightness
   static const double _minChordFreqHz = 55.0;
@@ -191,6 +195,13 @@ class DSPEngine {
     return max(1, frames);
   }
 
+  int get _octaveBufferMaxFrames {
+    // frames ≈ windowMs / hopDurationMs
+    double hopMs = hopSize / sampleRate * 1000.0;
+    int frames = (octaveWindowMs / max(hopMs, 1)).round();
+    return max(1, frames);
+  }
+
   DSPEngine({
     this.sampleRate = 44100,
     this.frameSize = 4096,
@@ -198,6 +209,7 @@ class DSPEngine {
     this.smoothingWindowMs = 300,
     this.chromaThreshold = 0.07, // Lowered threshold for better third detection
     this.enableDebugLogs = false,
+    this.octaveWindowMs = 300,
   });
 
   /// Validates signal before processing
@@ -418,40 +430,37 @@ class DSPEngine {
   /// Compute harmonic product spectrum for robust fundamental detection
   /// Multiplies spectrum by downsampled versions to find fundamental
   List<double> harmonicProductSpectrum(
-  List<double> magnitudes, {
-  int maxHarmonics = 5,  // Reduced from 8 to avoid over-emphasis of low frequencies
-}) {
-  if (magnitudes.isEmpty) return [];
+    List<double> magnitudes, {
+    int maxHarmonics = 5,
+  }) {
+    if (magnitudes.isEmpty) return [];
 
-  int specLength = magnitudes.length;
-  List<double> hps = List.filled(specLength, 1.0);
+    final int N = magnitudes.length;
+    // Work in log-magnitude to prevent exponential blow-up of harmonics.
+    final List<double> logMag = magnitudes
+        .map((v) => log(v + 1e-9))
+        .toList();
 
-  // Multiply by downsampled versions (use multiplication, not log addition)
-  for (int h = 1; h <= maxHarmonics; h++) {
-    for (int k = 0; k < specLength; k++) {
-      int harmonicBin = k * h;
-      if (harmonicBin < specLength) {
-        hps[k] *= max(magnitudes[harmonicBin], 1e-10);
-      } else {
-        break;
+    final List<double> hps = List<double>.filled(N, 0.0);
+
+    for (int k = 0; k < N; k++) {
+      double sum = logMag[k];
+      for (int h = 2; h <= maxHarmonics; h++) {
+        final int hk = k * h;
+        if (hk >= N) break;
+        sum += logMag[hk];
       }
+      hps[k] = sum;
     }
+
+    // Convert back from log-sum to a linear-ish scale for peak finding.
+    final List<double> linear = hps.map((v) => exp(v / maxHarmonics)).toList();
+
+    // Normalise.
+    final double maxVal = linear.reduce((a, b) => a > b ? a : b);
+    if (maxVal <= 0) return linear;
+    return linear.map((v) => v / maxVal).toList();
   }
-
-  // FIX: Apply nth root to prevent extreme values
-  // This is mathematically correct for HPS
-  double rootFactor = 1.0 / maxHarmonics;
-  hps = hps.map((v) => pow(v, rootFactor).toDouble()).toList();
-
-  // Normalize HPS
-  double maxVal = hps.reduce((a, b) => a > b ? a : b);
-  if (maxVal > 0) {
-    hps = hps.map((v) => v / maxVal).toList();
-  }
-
-  return hps;
-}
-
 /// Find peaks using Harmonic Product Spectrum
 List<PeakData> findPeaksHPS(
   List<double> magnitudes, {
@@ -512,63 +521,187 @@ List<PeakData> findPeaksHPS(
   }
 
   /// Find fundamental frequency using HPS
-  double findFundamentalHPS(
-    List<double> magnitudes, {
-    int minFreqHz = 80,
-    int maxFreqHz = 1000,
-    int maxHarmonics = 5,
-  }) {
-    if (magnitudes.isEmpty) return 0;
+double findFundamentalHPS(
+  List<double> magnitudes, {
+  int minFreqHz = 75,
+  int maxFreqHz = 1300,
+  int maxHarmonics = 5,
+}) {
+  if (magnitudes.isEmpty) return 0;
 
-    // Prefer simple peak detection for clean tones; it's more reliable for single
-    // sine waves (used by unit tests). Only accept peak if it's within the
-    // requested min/max frequency range.
-    double peakFreq = detectFrequency(magnitudes);
-    if (peakFreq >= minFreqHz && peakFreq <= maxFreqHz && peakFreq > 0) {
-      return peakFreq;
+  final List<double> hps = harmonicProductSpectrum(
+    magnitudes,
+    maxHarmonics: maxHarmonics,
+  );
+
+  final double freqResolution = sampleRate / (magnitudes.length * 2.0);
+  final int minBin =
+      (minFreqHz / freqResolution).floor().clamp(1, magnitudes.length - 1);
+  final int maxBin =
+      (maxFreqHz / freqResolution).ceil().clamp(minBin + 1, magnitudes.length - 1);
+
+  // Find HPS peak in the guitar range.
+  double maxHPS = -1;
+  int peakBin = minBin;
+  for (int k = minBin; k <= maxBin; k++) {
+    if (hps[k] > maxHPS) {
+      maxHPS = hps[k];
+      peakBin = k;
     }
-
-    List<double> hps = harmonicProductSpectrum(
-      magnitudes, 
-      maxHarmonics: maxHarmonics
-    );
-
-    List<double> freqs = getFrequencyBins(magnitudes.length);
-    double freqResolution = sampleRate / (magnitudes.length * 2);
-    int minBin = (minFreqHz / freqResolution).toInt().clamp(1, magnitudes.length - 1);
-    int maxBin = (maxFreqHz / freqResolution).toInt().clamp(minBin + 1, magnitudes.length - 1);
-
-    double maxHPS = 0;
-    int peakBin = minBin;
-
-    // Find maximum in HPS within frequency range
-    for (int k = minBin; k <= maxBin && k < hps.length; k++) {
-      if (hps[k] > maxHPS) {
-        maxHPS = hps[k];
-        peakBin = k;
-      }
-    }
-
-    // Refine peak with interpolation
-    if (peakBin > minBin && peakBin < maxBin - 1) {
-      double fHps = _interpolatePeak(
-        hps[peakBin - 1], hps[peakBin], hps[peakBin + 1],
-        freqs[peakBin - 1], freqs[peakBin], freqs[peakBin + 1]
-      );
-
-      // Fallback: also compute prominent peak using simple peak detection
-      double fPeak = detectFrequency(magnitudes);
-
-      // If the two estimates disagree by more than 20 Hz, prefer the peak-based estimate
-      if (fPeak > 0 && (fHps - fPeak).abs() > 20.0) {
-        return fPeak;
-      }
-
-      return fHps;
-    }
-
-    return freqs[peakBin];
   }
+
+  // Parabolic interpolation for sub-bin accuracy.
+  double peakFreq;
+  if (peakBin > minBin && peakBin < maxBin) {
+    final double ym1 = hps[peakBin - 1];
+    final double y0  = hps[peakBin];
+    final double yp1 = hps[peakBin + 1];
+    final double denom = ym1 - 2 * y0 + yp1;
+    final double shift = denom != 0 ? 0.5 * (ym1 - yp1) / denom : 0.0;
+    peakFreq = (peakBin + shift) * freqResolution;
+  } else {
+    peakFreq = peakBin * freqResolution;
+  }
+
+  // ── Sub-harmonic check ────────────────────────────────────────────────────
+  // If half this frequency (one octave down) has meaningful spectral energy,
+  // the HPS peak is almost certainly sitting on the 2nd harmonic.
+  // We only descend one octave — two octaves down would be below guitar range.
+  final double subFreq = peakFreq / 2.0;
+  if (subFreq >= minFreqHz) {
+    final double subEnergy = _subHarmonicCheck(magnitudes, subFreq, freqResolution);
+    final double peakEnergy = _subHarmonicCheck(magnitudes, peakFreq, freqResolution);
+
+    // If the sub-harmonic has at least 20 % of the HPS-peak's raw energy,
+    // trust it as the true fundamental.  The 20 % threshold is intentionally
+    // low: on guitar the fundamental is often weaker than the 2nd harmonic
+    // (especially on wound strings), so we lean toward the lower octave.
+    if (peakEnergy > 0 && subEnergy / peakEnergy >= 0.20) {
+      return subFreq;
+    }
+  }
+
+  return peakFreq;
+}
+
+double _subHarmonicCheck(
+  List<double> magnitudes,
+  double targetHz,
+  double freqResolution,
+) {
+  final int centerBin = (targetHz / freqResolution).round();
+  final int lo = (centerBin - 2).clamp(0, magnitudes.length - 1);
+  final int hi = (centerBin + 2).clamp(0, magnitudes.length - 1);
+
+  double peak = 0;
+  for (int b = lo; b <= hi; b++) {
+    if (magnitudes[b] > peak) peak = magnitudes[b];
+  }
+  return peak;
+}
+
+double _autocorrelationF0(
+  List<double> samples, {
+  int minFreqHz = 75,
+  int maxFreqHz = 1300,
+}) {
+  final int N = samples.length;
+  if (N < 2) return 0;
+
+  // Lag range in samples.
+  final int minLag = (sampleRate / maxFreqHz).floor().clamp(1, N - 1);
+  final int maxLag = (sampleRate / minFreqHz).ceil().clamp(minLag + 1, N - 1);
+
+  // Normalised autocorrelation (NSDF style — avoids bias toward short lags).
+  // r[lag] = sum(x[n]*x[n+lag]) / sqrt(sum(x[n]^2) * sum(x[n+lag]^2))
+
+  double bestCorr = -1;
+  int bestLag = minLag;
+
+  for (int lag = minLag; lag <= maxLag; lag++) {
+    double num = 0, e1 = 0, e2 = 0;
+    final int len = N - lag;
+    for (int n = 0; n < len; n++) {
+      num += samples[n] * samples[n + lag];
+      e1  += samples[n] * samples[n];
+      e2  += samples[n + lag] * samples[n + lag];
+    }
+    final double denom = sqrt(e1 * e2);
+    final double corr = denom > 1e-10 ? num / denom : 0.0;
+    if (corr > bestCorr) {
+      bestCorr = corr;
+      bestLag = lag;
+    }
+  }
+
+  // Reject weak correlations — likely noise or inharmonic transients.
+  if (bestCorr < 0.5) return 0;
+
+  // Sub-sample refinement via parabolic interpolation on the correlation peak.
+  double refinedLag = bestLag.toDouble();
+  if (bestLag > minLag && bestLag < maxLag) {
+    final double ym1 = _autocorrelationAt(samples, bestLag - 1);
+    final double y0  = _autocorrelationAt(samples, bestLag);
+    final double yp1 = _autocorrelationAt(samples, bestLag + 1);
+    final double denom2 = ym1 - 2 * y0 + yp1;
+    if (denom2 != 0) {
+      refinedLag += 0.5 * (ym1 - yp1) / denom2;
+    }
+  }
+
+  return sampleRate / refinedLag;
+}
+
+double _autocorrelationAt(List<double> samples, int lag) {
+  final int len = samples.length - lag;
+  if (len <= 0) return 0;
+  double sum = 0;
+  for (int n = 0; n < len; n++) {
+    sum += samples[n] * samples[n + lag];
+  }
+  return sum;
+}
+
+double _robustFundamental(List<double> magnitudes, List<double> timeDomain) {
+  const int minHz = 75;
+  const int maxHz = 1300;
+
+  final double hps  = findFundamentalHPS(magnitudes,
+      minFreqHz: minHz, maxFreqHz: maxHz);
+  final double ac   = _autocorrelationF0(timeDomain,
+      minFreqHz: minHz, maxFreqHz: maxHz);
+
+  // Neither method found anything.
+  if (hps <= 0 && ac <= 0) return 0;
+
+  // Only one succeeded — use it.
+  if (hps <= 0) return ac;
+  if (ac  <= 0) return hps;
+
+  // Both succeeded — compare.
+  // Agreement within ±1 semitone (≈ 5.9 % frequency ratio).
+  final double ratio = hps / ac;
+  const double semitoneTolerance = 1.0594630943592953; // 2^(1/12)
+
+  if (ratio < semitoneTolerance && ratio > 1.0 / semitoneTolerance) {
+    // They agree — HPS has better frequency resolution, use it.
+    return hps;
+  }
+
+  // HPS is approximately one octave above autocorrelation → octave error.
+  if (ratio > 1.8 && ratio < 2.2) {
+    return ac; // trust autocorrelation
+  }
+
+  // HPS is approximately one octave below (rare but possible).
+  if (ratio > 0.45 && ratio < 0.55) {
+    return hps;
+  }
+
+  // Larger disagreement — autocorrelation is more reliable for octave identity.
+  return ac;
+}
+
   // ============ Harmonic Weighting ============
 
   /// Apply harmonic weighting to spectrum
@@ -747,6 +880,28 @@ List<PeakData> findPeaksHPS(
 
     double cents = (semitones - semitones.roundToDouble()) * 100;
     return '${noteNames[noteInOctave]}$octave (${cents > 0 ? '+' : ''}${cents.toStringAsFixed(1)} ¢)';
+  }
+
+  /// Convert a note name with octave (e.g. "A2", "C#3") to frequency in Hz.
+  /// Returns null if parsing fails or the pitch is out of a reasonable range.
+  double? _noteNameWithOctaveToFrequency(String note) {
+    final match = RegExp(r'^([A-G]#?)(-?\d)$').firstMatch(note.trim());
+    if (match == null) return null;
+
+    final baseName = match.group(1)!;
+    final octave = int.tryParse(match.group(2)!);
+    if (octave == null) return null;
+
+    final baseFreq = noteFrequencies[baseName];
+    if (baseFreq == null) return null;
+
+    // noteFrequencies[] hold 4th‑octave pitches (e.g. A4 = 440).
+    final semitoneOffset = (octave - 4) * 12;
+    final freq = baseFreq * pow(2.0, semitoneOffset / 12.0);
+
+    // Guardrails: ignore clearly impossible guitar‑practice ranges.
+    if (freq <= 10 || freq > 8000) return null;
+    return freq;
   }
 
   /// Get unique pitch classes from frequencies
@@ -931,6 +1086,14 @@ List<PeakData> findPeaksHPS(
     }
   }
 
+  void _pushOctavePair(_OctavePair pair) {
+    _octaveHistory.add(pair);
+    int maxFrames = _octaveBufferMaxFrames;
+    while (_octaveHistory.length > maxFrames) {
+      _octaveHistory.removeAt(0);
+    }
+  }
+
   List<double> _averageChroma() {
     if (_chromaBuffer.isEmpty) return List.filled(chromaBins, 0.0);
     List<double> avg = List.filled(chromaBins, 0.0);
@@ -1093,6 +1256,43 @@ List<PeakData> findPeaksHPS(
     return ((midi % 12) + 12) % 12;
   }
 
+  _OctavePair? _findBestOctavePair(List<PeakData> peaks) {
+    if (peaks.length < 2) return null;
+
+    // Work on the loudest peaks first.
+    final sorted = List<PeakData>.from(peaks)
+      ..sort((a, b) => b.magnitude.compareTo(a.magnitude));
+    final top = sorted.take(8).toList();
+
+    _OctavePair? best;
+    double bestCost = double.infinity;
+
+    for (int i = 0; i < top.length; i++) {
+      for (int j = i + 1; j < top.length; j++) {
+        final f1 = top[i].frequency;
+        final f2 = top[j].frequency;
+        if (f1 <= 0 || f2 <= 0) continue;
+
+        final low = min(f1, f2);
+        final high = max(f1, f2);
+
+        // Octave interval should be very close to 1200 cents.
+        final intervalCents = 1200.0 * (log(high / low) / ln2);
+        final diff = (intervalCents - 1200.0).abs();
+
+        // Discard clearly non‑octave pairs (> ~2/3 semitone off).
+        if (diff > 80.0) continue;
+
+        if (diff < bestCost) {
+          bestCost = diff;
+          best = _OctavePair(low, high);
+        }
+      }
+    }
+
+    return best;
+  }
+
   /// End-to-end chord detection from spectrum with latency measurement and stability filtering
   MultiNoteDetectionResult detectMultiNoteChord(List<double> magnitudes) {
     // Measure processing latency
@@ -1156,6 +1356,114 @@ List<PeakData> findPeaksHPS(
       chordName: simplifyChordName(finalChordName),
       confidence: confidence,
     );
+  }
+
+  /// Octave detection helper using HPS + a short rolling buffer.
+  /// Returns how closely the detected low/high notes match the requested octave.
+  OctaveResult detectOctaveFromSpectrum(
+    List<double> magnitudes, {
+    required String targetLow,
+    required String targetHigh,
+    double centsTolerance = 15.0,
+  }) {
+    if (magnitudes.isEmpty) {
+      _octaveHistory.clear();
+      return OctaveResult.noInput(targetLow: targetLow, targetHigh: targetHigh);
+    }
+
+    // Find candidate fundamentals/harmonics using HPS.
+    final peaks = findPeaksHPS(
+      magnitudes,
+      threshold: 0.06,
+      maxHarmonics: 5,
+      maxPeaks: 10,
+    );
+
+    final pair = _findBestOctavePair(peaks);
+
+    if (pair != null) {
+      _pushOctavePair(pair);
+    } else if (peaks.isEmpty) {
+      // No usable peaks at all → treat as no input and clear history.
+      _octaveHistory.clear();
+      return OctaveResult.noInput(targetLow: targetLow, targetHigh: targetHigh);
+    }
+
+    if (_octaveHistory.isEmpty) {
+      return OctaveResult.noInput(targetLow: targetLow, targetHigh: targetHigh);
+    }
+
+    // Average over the last ~300 ms for stability.
+    double avgLow = 0;
+    double avgHigh = 0;
+    for (final p in _octaveHistory) {
+      avgLow += p.lowHz;
+      avgHigh += p.highHz;
+    }
+    final len = _octaveHistory.length.toDouble();
+    avgLow /= len;
+    avgHigh /= len;
+
+    final targetLowHz = _noteNameWithOctaveToFrequency(targetLow);
+    final targetHighHz = _noteNameWithOctaveToFrequency(targetHigh);
+
+    if (targetLowHz == null || targetHighHz == null) {
+      return OctaveResult(
+        targetLow: targetLow,
+        targetHigh: targetHigh,
+        detectedLowHz: avgLow,
+        detectedHighHz: avgHigh,
+        centsOffLow: null,
+        centsOffHigh: null,
+        status: OctaveStatus.wrongNotes,
+      );
+    }
+
+    // Cents offsets relative to target pitches.
+    final centsLow =
+        (1200.0 * (log(avgLow / targetLowHz) / ln2)).round();
+    final centsHigh =
+        (1200.0 * (log(avgHigh / targetHighHz) / ln2)).round();
+
+    // Check that the interval itself is an octave.
+    final intervalCents = 1200.0 * (log(avgHigh / avgLow) / ln2);
+    final intervalError = (intervalCents - 1200.0).abs();
+    const double intervalTolerance = 40.0; // ~1/3 semitone
+
+    OctaveStatus status;
+    final absLow = centsLow.abs();
+    final absHigh = centsHigh.abs();
+
+    if (intervalError > intervalTolerance) {
+      status = OctaveStatus.wrongNotes;
+    } else if (absLow <= centsTolerance && absHigh <= centsTolerance) {
+      status = OctaveStatus.correct;
+    } else {
+      // Decide whether the overall tendency is sharp or flat.
+      final dominant = absLow >= absHigh ? centsLow : centsHigh;
+      if (dominant > centsTolerance) {
+        status = OctaveStatus.sharpNote;
+      } else if (dominant < -centsTolerance) {
+        status = OctaveStatus.flatNote;
+      } else {
+        status = OctaveStatus.wrongNotes;
+      }
+    }
+
+    return OctaveResult(
+      targetLow: targetLow,
+      targetHigh: targetHigh,
+      detectedLowHz: avgLow,
+      detectedHighHz: avgHigh,
+      centsOffLow: centsLow,
+      centsOffHigh: centsHigh,
+      status: status,
+    );
+  }
+
+  /// Reset stored octave history (use when starting a new exercise).
+  void resetOctaveHistory() {
+    _octaveHistory.clear();
   }
 
   /// Legacy method maintaining compatibility
@@ -1609,6 +1917,51 @@ class MultiNoteDetectionResult {
       'Chord: $chordName\nNotes: ${detectedNotes.join(", ")}\nFrequencies: ${fundamentalFrequencies.map((f) => f.toStringAsFixed(1)).join(", ")} Hz\nConfidence: ${(confidence * 100).toStringAsFixed(1)}%';
 }
 
+/// Octave detection status for practice mode.
+enum OctaveStatus {
+  correct,
+  sharpNote,
+  flatNote,
+  wrongNotes,
+  noInput,
+}
+
+/// Result of analysing whether two notes form a target octave.
+class OctaveResult {
+  final String targetLow;   // e.g. "A2"
+  final String targetHigh;  // e.g. "A3"
+  final double? detectedLowHz;
+  final double? detectedHighHz;
+  final int? centsOffLow;
+  final int? centsOffHigh;
+  final OctaveStatus status;
+
+  const OctaveResult({
+    required this.targetLow,
+    required this.targetHigh,
+    required this.detectedLowHz,
+    required this.detectedHighHz,
+    required this.centsOffLow,
+    required this.centsOffHigh,
+    required this.status,
+  });
+
+  factory OctaveResult.noInput({
+    required String targetLow,
+    required String targetHigh,
+  }) {
+    return OctaveResult(
+      targetLow: targetLow,
+      targetHigh: targetHigh,
+      detectedLowHz: null,
+      detectedHighHz: null,
+      centsOffLow: null,
+      centsOffHigh: null,
+      status: OctaveStatus.noInput,
+    );
+  }
+}
+
 /// Complex number for FFT calculations
 class Complex {
   double real;
@@ -1780,5 +2133,13 @@ class StreamingAudioState {
       currentBuffer[i] = 0.0;
     }
   }
+}
+
+/// Lightweight container for averaging octave candidates over a short window.
+class _OctavePair {
+  final double lowHz;
+  final double highHz;
+
+  _OctavePair(this.lowHz, this.highHz);
 }
 

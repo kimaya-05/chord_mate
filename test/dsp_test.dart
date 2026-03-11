@@ -70,13 +70,17 @@ void main() {
       final freqs = [329.63, 415.30, 493.88];
       final List<double> signal = List.generate(N, (n) {
         double val = 0;
-        for (var f in freqs) val += sin(2 * pi * f * n / sampleRate);
+        for (var f in freqs) {
+          val += sin(2 * pi * f * n / sampleRate);
+        }
         return val / freqs.length;
       });
       final fft = dsp.computeFFT(dsp.applyWindow(signal));
       // Feed 6 identical frames so the stability filter commits.
       late MultiNoteDetectionResult result;
-      for (int i = 0; i < 6; i++) result = dsp.detectMultiNoteChord(fft);
+      for (int i = 0; i < 6; i++) {
+        result = dsp.detectMultiNoteChord(fft);
+      }
       expect(result.chordName, equals('E'));
     });
 
@@ -85,12 +89,16 @@ void main() {
       final freqs = [349.23, 440.00, 523.25];
       final List<double> signal = List.generate(N, (n) {
         double val = 0;
-        for (var f in freqs) val += sin(2 * pi * f * n / sampleRate);
+        for (var f in freqs) {
+          val += sin(2 * pi * f * n / sampleRate);
+        }
         return val / freqs.length;
       });
       final fft = dsp.computeFFT(dsp.applyWindow(signal));
       late MultiNoteDetectionResult result;
-      for (int i = 0; i < 6; i++) result = dsp.detectMultiNoteChord(fft);
+      for (int i = 0; i < 6; i++) {
+        result = dsp.detectMultiNoteChord(fft);
+      }
       expect(result.chordName, equals('F'));
     });
 
@@ -99,12 +107,16 @@ void main() {
       final freqs = [440.00, 554.37, 659.25];
       final List<double> signal = List.generate(N, (n) {
         double val = 0;
-        for (var f in freqs) val += sin(2 * pi * f * n / sampleRate);
+        for (var f in freqs) {
+          val += sin(2 * pi * f * n / sampleRate);
+        }
         return val / freqs.length;
       });
       final fft = dsp.computeFFT(dsp.applyWindow(signal));
       late MultiNoteDetectionResult result;
-      for (int i = 0; i < 6; i++) result = dsp.detectMultiNoteChord(fft);
+      for (int i = 0; i < 6; i++) {
+        result = dsp.detectMultiNoteChord(fft);
+      }
       expect(result.chordName, equals('A'));
     });
 
@@ -113,13 +125,17 @@ void main() {
       final freqs = [329.63, 415.30, 493.88];
       final List<double> signal = List.generate(N, (n) {
         double val = 0;
-        for (var f in freqs) val += sin(2 * pi * f * n / sampleRate);
+        for (var f in freqs) {
+          val += sin(2 * pi * f * n / sampleRate);
+        }
         return val / freqs.length;
       });
       final fft = dsp.computeFFT(dsp.applyWindow(signal));
 
       // Feed 4 frames (below threshold of 5) – committed chord may still be empty/unknown.
-      for (int i = 0; i < 4; i++) dsp.detectMultiNoteChord(fft);
+      for (int i = 0; i < 4; i++) {
+        dsp.detectMultiNoteChord(fft);
+      }
       final beforeThreshold = dsp.detectMultiNoteChord(fft); // 5th frame triggers commit
 
       // After 5 identical frames, the chord should be committed.

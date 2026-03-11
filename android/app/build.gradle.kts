@@ -8,6 +8,7 @@ plugins {
 android {
     namespace = "com.example.chord_mate"
     compileSdk = flutter.compileSdkVersion
+    compileSdkVersion 33
     ndkVersion = flutter.ndkVersion
 
     compileOptions {
