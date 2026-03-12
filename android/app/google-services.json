@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "503890247865",
+    "project_id": "chordmate-10f50",
+    "storage_bucket": "chordmate-10f50.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:503890247865:android:b12a75f199672686f91b68",
+        "android_client_info": {
+          "package_name": "com.example.chord_mate"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyB08tpz3cWf0kmSJq2_Qnl9TttvZLC3c10"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
