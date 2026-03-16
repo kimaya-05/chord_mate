@@ -4,6 +4,7 @@ import '../auth/auth_service.dart';
 import 'auth_provider.dart';
 import 'login_page.dart';
 import 'signup_page.dart';
+import '../ui/user_home_page.dart';
 import '../ui/metronome_page.dart';
 import '../chords/chord_list_page.dart';
 import '../ui/guitar_tuner_page.dart';
@@ -90,23 +91,22 @@ class AppRouter extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return const GuitarTunerPage();
-    // final auth = context.watch<AuthProvider>();
+    final auth = context.watch<AuthProvider>();
 
-    // // Still resolving Firebase auth state on startup.
-    // if (auth.isLoading) {
-    //   return const _SplashScreen();
-    // }
+    // Still resolving Firebase auth state on startup.
+    if (auth.isLoading) {
+      return const _SplashScreen();
+    }
 
-    // // Not signed in → show login.
-    // if (!auth.isSignedIn) {
-    //   return const LoginPage();
-    // }
+    // Not signed in → show login.
+    if (!auth.isSignedIn) {
+      return const LoginPage();
+    }
 
-    // // Signed in → route by role.
-    // return auth.isModerator
-    //     ? const ModeratorDashboardPage()
-    //     : const UserHomePage();
+    // Signed in → route by role.
+    return auth.isModerator
+      ? const ModeratorDashboardPage()
+      : const MainShell();
   }
 }
 
@@ -148,7 +148,7 @@ class AppRoutes {
   static Map<String, WidgetBuilder> get routes => {
     login:     (_) => const LoginPage(),
     signup:    (_) => const SignupPage(),
-    home:      (_) => const UserHomePage(),
+    home: (_) => const MainShell(),
     moderator: (_) => const ModeratorDashboardPage(),
   };
 }

@@ -8,6 +8,7 @@ import '../services/audio_service.dart';
 import '../dsp/dsp_engine.dart';
 import 'chord_voicings.dart';
 import 'chord_diagram_widget.dart';
+import '../ui/user_home_page.dart';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Detection state
@@ -59,6 +60,7 @@ class _ChordDetailPageState extends State<ChordDetailPage>
   @override
   void initState() {
     super.initState();
+    RecentChordsStore().add(widget.chord);
     _pageController = PageController(viewportFraction: 0.85);
 
     _pulseCtrl = AnimationController(
