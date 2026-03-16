@@ -12,7 +12,20 @@
           "package_name": "com.example.chord_mate"
         }
       },
-      "oauth_client": [],
+      "oauth_client": [
+        {
+          "client_id": "503890247865-ou1uonho6r1p1rnln4f9198g78olcmji.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.example.chord_mate",
+            "certificate_hash": "7ad3e5b6d6a0355d4a74caaee96b57a868d07df8"
+          }
+        },
+        {
+          "client_id": "503890247865-gk930suga4q42jcp0esnpv4f9d0l2d56.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
       "api_key": [
         {
           "current_key": "AIzaSyB08tpz3cWf0kmSJq2_Qnl9TttvZLC3c10"
@@ -20,7 +33,19 @@
       ],
       "services": {
         "appinvite_service": {
-          "other_platform_oauth_client": []
+          "other_platform_oauth_client": [
+            {
+              "client_id": "503890247865-gk930suga4q42jcp0esnpv4f9d0l2d56.apps.googleusercontent.com",
+              "client_type": 3
+            },
+            {
+              "client_id": "503890247865-qsm30jjk501t3mieh1r4ht0gnavli2kb.apps.googleusercontent.com",
+              "client_type": 2,
+              "ios_info": {
+                "bundle_id": "com.example.chordMate"
+              }
+            }
+          ]
         }
       }
     }

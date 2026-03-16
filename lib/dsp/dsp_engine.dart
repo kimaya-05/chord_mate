@@ -1,13 +1,11 @@
 import 'dart:math';
 
-/// Musical notes and their MIDI numbers (using A4 = 440 Hz standard)
 const Map<String, double> noteFrequencies = {
   'C': 261.63, 'C#': 277.18, 'D': 293.66, 'D#': 311.13,
   'E': 329.63, 'F': 349.23, 'F#': 369.99, 'G': 392.00,
   'G#': 415.30, 'A': 440.00, 'A#': 466.16, 'B': 493.88,
 };
 
-/// Common chord templates with their intervals (semitones from root)
 const Map<String, List<int>> chordTemplates = {
   'Major': [0, 4, 7],
   'Minor': [0, 3, 7],
@@ -15,7 +13,7 @@ const Map<String, List<int>> chordTemplates = {
   'MajorSeventh': [0, 4, 7, 11],
   'MinorSeventh': [0, 3, 7, 10],
   'Diminished': [0, 3, 6],
-  'Augmented': [0, 4, 8],
+  'Augmented': [0, 4, 8],   
   'Sus2': [0, 2, 7],
   'Sus4': [0, 5, 7],
 };
@@ -25,46 +23,44 @@ const List<String> noteNames = [
   'F#', 'G', 'G#', 'A', 'A#', 'B'
 ];
 
-/// Maps a detected chord name (e.g. "D MajorSeventh", "C# Minor") to one of
-/// the 14 simplified categories: A, A minor, B, B minor … G, G minor.
-///
-/// Mapping rules:
-///  • Sharp/enharmonic roots → nearest natural note
-///    C# → C,  D# → E,  F# → G,  G# → A,  A# → B
-///  • Minor-type suffixes (Minor*, Dim*, Diminished*) → "<root> minor"
-///  • All other suffixes (Major, Dominant7, MajorSeventh, Sus*, Augmented,
-///    ambiguous …) → "<root>"  (treated as major)
-///  • "Unknown" / unrecognised strings → returned unchanged
 String simplifyChordName(String rawName) {
   if (rawName.isEmpty || rawName == 'Unknown') return rawName;
 
-  // If result contains ambiguous marker just take everything before " / "
-  String name = rawName.contains(' / ') ? rawName.split(' / ').first.trim() : rawName;
+  // If ambiguous (e.g. "Am / C"), take the first option only.
+  String name = rawName.contains(' / ')
+      ? rawName.split(' / ').first.trim()
+      : rawName;
 
-  // Extract root note (handles sharps: "C#", "G#", etc.)
   final rootMatch = RegExp(r'^([A-G]#?)').firstMatch(name);
   if (rootMatch == null) return rawName;
-  String root = rootMatch.group(1)!;
+  final String root = rootMatch.group(1)!;
 
-  // Map sharp roots to nearest natural note
-  const Map<String, String> sharpToNatural = {
-    'C#': 'C',
-    'D#': 'E',
-    'F#': 'G',
-    'G#': 'A',
-    'A#': 'B',
-  };
-  root = sharpToNatural[root] ?? root;
+  // Extract the chord type (everything after the root note).
+  final String type = name.substring(rootMatch.end).trim();
 
-  // Extract the chord type portion (everything after the root)
-  String type = name.substring(rootMatch.end).trim();
-
-  // Decide major vs minor
-  bool isMinor = type.startsWith('Minor') ||
+  // Decide major vs minor before any enharmonic mapping so we don't
+  // lose the minor quality when collapsing sharps.
+  final bool isMinor = type.startsWith('Minor') ||
       type.startsWith('Dim') ||
       type.startsWith('Diminished');
 
-  return isMinor ? '$root minor' : root;
+  // Map sharp roots to the nearest natural note that matches one of the
+  // 14 practice chords: A Am B Bm C Cm D Dm E Em F Fm G Gm.
+  //
+  // Major sharps → nearest natural major:  C#→C  D#→E  F#→G  G#→A  A#→B
+  // Minor sharps → nearest natural minor:  C#m→Cm D#m→Em F#m→Gm G#m→Am A#m→Bm
+  const Map<String, String> sharpMajor = {
+    'C#': 'C', 'D#': 'E', 'F#': 'G', 'G#': 'A', 'A#': 'B',
+  };
+  const Map<String, String> sharpMinor = {
+    'C#': 'C', 'D#': 'E', 'F#': 'G', 'G#': 'A', 'A#': 'B',
+  };
+
+  final String naturalRoot = isMinor
+      ? (sharpMinor[root] ?? root)
+      : (sharpMajor[root] ?? root);
+
+  return isMinor ? '$naturalRoot minor' : naturalRoot;
 }
 
 const double ln2 = 0.693147180559945;
@@ -1161,7 +1157,8 @@ double _robustFundamental(List<double> magnitudes, List<double> timeDomain) {
         // Interval-based weights (avoid treating sus tones like a "third")
         double intervalWeight(int interval) {
           if (interval == 0) return 1.15; // root
-          if (interval == 3 || interval == 4) return 1.55; // minor/major third
+          if (interval == 3) return 1.80; // minor third — boosted for minor chord detection
+          if (interval == 4) return 1.55;
           if (interval == 7) return 1.05; // fifth
           if (interval == 10 || interval == 11) return 0.85; // 7th
           if (interval == 2 || interval == 5) return 1.05; // sus2 / sus4
@@ -1201,11 +1198,13 @@ double _robustFundamental(List<double> magnitudes, List<double> timeDomain) {
 
         // Bass prior: if we have a bass pitch class estimate, gently reward
         // templates whose root (or chord tone) matches it.
-        if (bassPitchClass != null) {
+         if (bassPitchClass != null) {
           if (bassPitchClass == root) {
-            score += 0.06;
+            score += 0.18;
           } else if (chordToneMask[bassPitchClass] > 0) {
-            score += 0.03;
+            score += 0.04;
+          } else {
+            score -= 0.08;
           }
         }
 
@@ -1243,8 +1242,8 @@ double _robustFundamental(List<double> magnitudes, List<double> timeDomain) {
 
     // Find strongest peak in low-frequency band (bass region).
     // Using peaks avoids being tricked by broadband noise.
-    final bassPeaks = findPeaks(magnitudes, threshold: 0.03)
-        .where((p) => p.frequency >= 55.0 && p.frequency <= 260.0)
+    final bassPeaks = findPeaks(magnitudes, threshold: 0.02)
+        .where((p) => p.frequency >= 55.0 && p.frequency <= 350.0)
         .toList();
     if (bassPeaks.isEmpty) return null;
     bassPeaks.sort((a, b) => b.magnitude.compareTo(a.magnitude));
