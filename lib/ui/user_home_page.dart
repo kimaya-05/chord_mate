@@ -6,6 +6,10 @@ import '../chords/chord_detail_page.dart';
 import '../chords/chord_voicings.dart';
 import '../ui/metronome_page.dart';
 import '../ui/guitar_tuner_page.dart';
+import '../forum/forum_feed_page.dart';
+import '../forum/forum_models.dart';
+import '../forum/forum_service.dart';
+import '../forum/post_viewer_page.dart';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Static content — tips and song of the day
@@ -115,6 +119,7 @@ class _MainShellState extends State<MainShell> {
     _NavItem(icon: Icons.music_note_outlined, activeIcon: Icons.music_note,       label: 'Practice'),
     _NavItem(icon: Icons.tune_outlined,       activeIcon: Icons.tune,             label: 'Tuner'),
     _NavItem(icon: Icons.timer_outlined,      activeIcon: Icons.timer,            label: 'Metronome'),
+    _NavItem(icon: Icons.forum_outlined, activeIcon: Icons.forum, label: 'Forum'),
   ];
 
   @override
@@ -128,6 +133,7 @@ class _MainShellState extends State<MainShell> {
           const ChordListPage(),
           const GuitarTunerPage(),
           const MetronomePage(),
+          const ForumFeedPage(),
         ],
       ),
       bottomNavigationBar: _BottomNav(
@@ -628,7 +634,7 @@ class _UserHomePageState extends State<UserHomePage> {
         icon:    Icons.forum_outlined,
         label:   'Forum',
         color:   const Color(0xFF7E8CE0),
-        navIndex: null, // coming soon
+        navIndex: 4, 
       ),
     ];
 

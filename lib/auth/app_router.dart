@@ -8,28 +8,29 @@ import '../ui/user_home_page.dart';
 import '../ui/metronome_page.dart';
 import '../chords/chord_list_page.dart';
 import '../ui/guitar_tuner_page.dart';
+import '../forum/moderator_dashboard_page.dart';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Placeholder screens — replace with your real pages.
 // ─────────────────────────────────────────────────────────────────────────────
 
-class UserHomePage extends StatelessWidget {
-  const UserHomePage({super.key});
-  @override
-  Widget build(BuildContext context) => const _PlaceholderPage(
-        label: 'Home',
-        icon: Icons.music_note,
-      );
-}
+// class UserHomePage extends StatelessWidget {
+//   const UserHomePage({super.key});
+//   @override
+//   Widget build(BuildContext context) => const _PlaceholderPage(
+//         label: 'Home',
+//         icon: Icons.music_note,
+//       );
+// }
 
-class ModeratorDashboardPage extends StatelessWidget {
-  const ModeratorDashboardPage({super.key});
-  @override
-  Widget build(BuildContext context) => const _PlaceholderPage(
-        label: 'Moderator Dashboard',
-        icon: Icons.admin_panel_settings,
-      );
-}
+// class ModeratorDashboardPage extends StatelessWidget {
+//   const ModeratorDashboardPage({super.key});
+//   @override
+//   Widget build(BuildContext context) => const _PlaceholderPage(
+//         label: 'Moderator Dashboard',
+//         icon: Icons.admin_panel_settings,
+//       );
+// }
 
 class _PlaceholderPage extends StatelessWidget {
   final String label;
