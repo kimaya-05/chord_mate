@@ -258,7 +258,7 @@ class _ReportCard extends StatelessWidget {
                   },
                 ),
               ),
-              const SizedBox(width: 8),
+              const SizedBox(width: 6),
 
               // Delete post
               Expanded(
@@ -269,7 +269,7 @@ class _ReportCard extends StatelessWidget {
                   onTap: () => _confirmDelete(context),
                 ),
               ),
-              const SizedBox(width: 8),
+              const SizedBox(width: 6),
 
               // Dismiss
               Expanded(
@@ -389,7 +389,7 @@ class _ActionButton extends StatelessWidget {
       child: Container(
         width: fullWidth ? double.infinity : null,
         padding: const EdgeInsets.symmetric(
-            horizontal: 10, vertical: 8),
+            horizontal: 6, vertical: 8),
         decoration: BoxDecoration(
           color: color.withOpacity(0.08),
           borderRadius: BorderRadius.circular(10),
@@ -400,13 +400,19 @@ class _ActionButton extends StatelessWidget {
           mainAxisSize:
               fullWidth ? MainAxisSize.max : MainAxisSize.min,
           children: [
-            Icon(icon, size: 14, color: color),
-            const SizedBox(width: 5),
-            Text(label,
-                style: TextStyle(
-                    fontSize: 12,
-                    fontWeight: FontWeight.w600,
-                    color: color)),
+            Icon(icon, size: 13, color: color),
+              const SizedBox(width: 4),
+              Flexible(
+                child: Text(
+                  label,
+                  style: TextStyle(
+                      fontSize: 11,
+                      fontWeight: FontWeight.w600,
+                      color: color),
+                  overflow: TextOverflow.ellipsis,
+                  maxLines: 1,
+                ),
+              ),
           ],
         ),
       ),

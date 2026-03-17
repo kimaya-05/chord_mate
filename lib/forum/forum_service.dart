@@ -37,6 +37,52 @@ class ForumService {
     );
   }
 
+  /// Search posts by title or artist — client-side filter on full stream.
+  /// Returns all posts then filters in memory since Firestore lacks full-text search.
+  Future<List<ForumPost>> searchPosts(String query) async {
+    final snap = await _posts.orderBy('createdAt', descending: true).get();
+    final all  = snap.docs.map(ForumPost.fromFirestore).toList();
+    if (query.trim().isEmpty) return all;
+    final q = query.trim().toLowerCase();
+    return all.where((p) =>
+      p.title.toLowerCase().contains(q) ||
+      p.artist.toLowerCase().contains(q),
+    ).toList();
+  }
+
+  /// Fetches the highest-rated post from the last 7 days for Song of the Day.
+  /// Returns null if no posts exist yet.
+  Future<ForumPost?> songOfTheDay() async {
+    final since = DateTime.now().subtract(const Duration(days: 7));
+    final snap  = await _posts
+        .where('createdAt', isGreaterThan: Timestamp.fromDate(since))
+        .where('ratingCount', isGreaterThan: 0)
+        .orderBy('createdAt', descending: true)
+        .get();
+    if (snap.docs.isEmpty) {
+      // Fall back to any post if nothing recent
+      final fallback = await _posts
+          .orderBy('ratingSum', descending: true)
+          .limit(1)
+          .get();
+      if (fallback.docs.isEmpty) return null;
+      return ForumPost.fromFirestore(fallback.docs.first);
+    }
+    // Pick the one with the best average rating
+    final posts = snap.docs.map(ForumPost.fromFirestore).toList();
+    posts.sort((a, b) => b.averageRating.compareTo(a.averageRating));
+    return posts.first;
+  }
+
+  /// All posts by a specific user, newest first.
+  Stream<List<ForumPost>> userPostsStream(String uid) {
+    return _posts
+        .where('authorUid', isEqualTo: uid)
+        .orderBy('createdAt', descending: true)
+        .snapshots()
+        .map((s) => s.docs.map(ForumPost.fromFirestore).toList());
+  }
+
   /// Single post stream — for live updates inside the post viewer.
   Stream<ForumPost?> postStream(String postId) {
     return _posts.doc(postId).snapshots().map(

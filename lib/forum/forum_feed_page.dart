@@ -24,16 +24,32 @@ class _ForumFeedPageState extends State<ForumFeedPage> {
   String? _filterDifficulty;
   String? _filterKey;
 
+  // Search
+  final TextEditingController _searchCtrl = TextEditingController();
+  String _searchQuery = '';
+  bool   _isSearching = false;
+
+  @override
+  void dispose() {
+    _searchCtrl.dispose();
+    super.dispose();
+  }
+
   bool get _hasFilter =>
       _filterGenre != null ||
       _filterDifficulty != null ||
       _filterKey != null;
 
-  void _clearFilters() => setState(() {
-        _filterGenre       = null;
-        _filterDifficulty  = null;
-        _filterKey         = null;
-      });
+  void _clearFilters() {
+    _searchCtrl.clear();
+    setState(() {
+      _filterGenre      = null;
+      _filterDifficulty = null;
+      _filterKey        = null;
+      _searchQuery      = '';
+      _isSearching      = false;
+    });
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -42,23 +58,52 @@ class _ForumFeedPageState extends State<ForumFeedPage> {
       appBar: AppBar(
         backgroundColor: const Color(0xFF0A0A0F),
         elevation: 0,
-        title: const Text(
-          'Chord Sheets',
-          style: TextStyle(
-              fontSize: 20,
-              fontWeight: FontWeight.w700,
-              color: Colors.white,
-              letterSpacing: -0.3),
-        ),
+        title: _isSearching
+            ? TextField(
+                controller: _searchCtrl,
+                autofocus: true,
+                style: const TextStyle(color: Colors.white, fontSize: 16),
+                decoration: InputDecoration(
+                  hintText: 'Search songs or artists…',
+                  hintStyle: TextStyle(
+                      color: Colors.white.withOpacity(0.35), fontSize: 15),
+                  border: InputBorder.none,
+                ),
+                onChanged: (v) => setState(() => _searchQuery = v),
+              )
+            : const Text(
+                'Chord Sheets',
+                style: TextStyle(
+                    fontSize: 20,
+                    fontWeight: FontWeight.w700,
+                    color: Colors.white,
+                    letterSpacing: -0.3),
+              ),
         actions: [
           IconButton(
-            icon: const Icon(Icons.add, color: Colors.greenAccent),
-            tooltip: 'New post',
-            onPressed: () => Navigator.push(
-              context,
-              MaterialPageRoute(builder: (_) => const CreatePostPage()),
+            icon: Icon(
+              _isSearching ? Icons.close : Icons.search,
+              color: Colors.white54,
             ),
+            onPressed: () {
+              setState(() {
+                _isSearching = !_isSearching;
+                if (!_isSearching) {
+                  _searchCtrl.clear();
+                  _searchQuery = '';
+                }
+              });
+            },
           ),
+          if (!_isSearching)
+            IconButton(
+              icon: const Icon(Icons.add, color: Colors.greenAccent),
+              tooltip: 'New post',
+              onPressed: () => Navigator.push(
+                context,
+                MaterialPageRoute(builder: (_) => const CreatePostPage()),
+              ),
+            ),
         ],
       ),
       body: Column(
@@ -154,7 +199,15 @@ class _ForumFeedPageState extends State<ForumFeedPage> {
                     TextStyle(color: Colors.white.withOpacity(0.4))),
           );
         }
-        final posts = snapshot.data ?? [];
+        List<ForumPost> posts = snapshot.data ?? [];
+        // Client-side search filter
+        if (_searchQuery.trim().isNotEmpty) {
+          final q = _searchQuery.trim().toLowerCase();
+          posts = posts.where((p) =>
+            p.title.toLowerCase().contains(q) ||
+            p.artist.toLowerCase().contains(q),
+          ).toList();
+        }
         if (posts.isEmpty) {
           return Center(
             child: Column(

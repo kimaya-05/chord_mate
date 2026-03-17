@@ -290,18 +290,31 @@ class _CreatePostPageState extends State<CreatePostPage>
   Widget _hint(String code, String desc) {
     return Padding(
       padding: const EdgeInsets.only(top: 4),
-      child: Row(children: [
-        Text(code,
-            style: const TextStyle(
-                fontSize: 12,
-                color: Colors.greenAccent,
-                fontFamily: 'monospace')),
-        const SizedBox(width: 10),
-        Text(desc,
-            style: TextStyle(
-                fontSize: 12,
-                color: Colors.white.withOpacity(0.35))),
-      ]),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Flexible(
+            flex: 2,
+            child: Text(
+              code,
+              style: const TextStyle(
+                  fontSize: 12,
+                  color: Colors.greenAccent,
+                  fontFamily: 'monospace'),
+            ),
+          ),
+          const SizedBox(width: 10),
+          Flexible(
+            flex: 3,
+            child: Text(
+              desc,
+              style: TextStyle(
+                  fontSize: 12,
+                  color: Colors.white.withOpacity(0.35)),
+            ),
+          ),
+        ],
+      ),
     );
   }
 
