@@ -245,7 +245,7 @@ class _PostViewerPageState extends State<PostViewerPage> {
                   ChordSheetRenderer(
                     content:             widget.post.content,
                     transposeSemitones:  _transposeSemitones,
-                    showInlineDiagrams:  true,
+                    showInlineDiagrams:  false,
                   ),
                   const SizedBox(height: 32),
 

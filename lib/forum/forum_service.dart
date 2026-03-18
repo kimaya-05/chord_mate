@@ -2,16 +2,17 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'forum_models.dart';
 
 // ─────────────────────────────────────────────────────────────────────────────
-// ForumService — all Firestore operations for the forum
+// ForumService
 // ─────────────────────────────────────────────────────────────────────────────
 
 class ForumService {
   final FirebaseFirestore _db = FirebaseFirestore.instance;
 
-  // ── Collections ─────────────────────────────────────────────────────────────
+  // ── Collection references ─────────────────────────────────────────────────
 
-  CollectionReference get _posts         => _db.collection('posts');
-  CollectionReference get _modReports    => _db.collection('moderator_reports');
+  CollectionReference get _posts       => _db.collection('posts');
+  CollectionReference get _modReports  => _db.collection('moderator_reports');
+  CollectionReference get _users       => _db.collection('users');
 
   CollectionReference _comments(String postId) =>
       _posts.doc(postId).collection('comments');
@@ -20,9 +21,8 @@ class ForumService {
   CollectionReference _reports(String postId) =>
       _posts.doc(postId).collection('reports');
 
-  // ── Posts — read ────────────────────────────────────────────────────────────
+  // ── Posts — read ──────────────────────────────────────────────────────────
 
-  /// Stream of all posts ordered by newest first.
   Stream<List<ForumPost>> postsStream({
     String? genre,
     String? difficulty,
@@ -37,21 +37,18 @@ class ForumService {
     );
   }
 
-  /// Search posts by title or artist — client-side filter on full stream.
-  /// Returns all posts then filters in memory since Firestore lacks full-text search.
   Future<List<ForumPost>> searchPosts(String query) async {
     final snap = await _posts.orderBy('createdAt', descending: true).get();
     final all  = snap.docs.map(ForumPost.fromFirestore).toList();
     if (query.trim().isEmpty) return all;
     final q = query.trim().toLowerCase();
-    return all.where((p) =>
-      p.title.toLowerCase().contains(q) ||
-      p.artist.toLowerCase().contains(q),
-    ).toList();
+    return all
+        .where((p) =>
+            p.title.toLowerCase().contains(q) ||
+            p.artist.toLowerCase().contains(q))
+        .toList();
   }
 
-  /// Fetches the highest-rated post from the last 7 days for Song of the Day.
-  /// Returns null if no posts exist yet.
   Future<ForumPost?> songOfTheDay() async {
     final since = DateTime.now().subtract(const Duration(days: 7));
     final snap  = await _posts
@@ -60,7 +57,6 @@ class ForumService {
         .orderBy('createdAt', descending: true)
         .get();
     if (snap.docs.isEmpty) {
-      // Fall back to any post if nothing recent
       final fallback = await _posts
           .orderBy('ratingSum', descending: true)
           .limit(1)
@@ -68,13 +64,11 @@ class ForumService {
       if (fallback.docs.isEmpty) return null;
       return ForumPost.fromFirestore(fallback.docs.first);
     }
-    // Pick the one with the best average rating
     final posts = snap.docs.map(ForumPost.fromFirestore).toList();
     posts.sort((a, b) => b.averageRating.compareTo(a.averageRating));
     return posts.first;
   }
 
-  /// All posts by a specific user, newest first.
   Stream<List<ForumPost>> userPostsStream(String uid) {
     return _posts
         .where('authorUid', isEqualTo: uid)
@@ -83,21 +77,21 @@ class ForumService {
         .map((s) => s.docs.map(ForumPost.fromFirestore).toList());
   }
 
-  /// Single post stream — for live updates inside the post viewer.
   Stream<ForumPost?> postStream(String postId) {
     return _posts.doc(postId).snapshots().map(
       (s) => s.exists ? ForumPost.fromFirestore(s) : null,
     );
   }
 
-  // ── Posts — write ───────────────────────────────────────────────────────────
+  // ── Posts — write ─────────────────────────────────────────────────────────
 
   Future<String> createPost(ForumPost post) async {
     final ref = await _posts.add(post.toFirestore());
     return ref.id;
   }
 
-  Future<void> updatePost(String postId, {
+  Future<void> updatePost(
+    String postId, {
     required String content,
     required String key,
     required int    capo,
@@ -115,13 +109,10 @@ class ForumService {
   }
 
   Future<void> deletePost(String postId) async {
-    // Delete the post document — subcollections are NOT auto-deleted by
-    // Firestore on the client side. For a production app use a Cloud Function.
-    // For now we just delete the post doc itself.
     await _posts.doc(postId).delete();
   }
 
-  // ── Comments ─────────────────────────────────────────────────────────────────
+  // ── Comments ──────────────────────────────────────────────────────────────
 
   Stream<List<ForumComment>> commentsStream(String postId) {
     return _comments(postId)
@@ -138,17 +129,14 @@ class ForumService {
     await _comments(postId).doc(commentId).delete();
   }
 
-  // ── Ratings ──────────────────────────────────────────────────────────────────
+  // ── Ratings ───────────────────────────────────────────────────────────────
 
-  /// Returns the current user's rating for a post, or null if not rated.
   Future<int?> getUserRating(String postId, String uid) async {
     final doc = await _ratings(postId).doc(uid).get();
     if (!doc.exists) return null;
     return (doc.data() as Map<String, dynamic>)['value'] as int?;
   }
 
-  /// Submit or update a rating. Uses a transaction to keep ratingSum/ratingCount
-  /// consistent.
   Future<void> ratePost(String postId, String uid, int newRating) async {
     final postRef   = _posts.doc(postId);
     final ratingRef = _ratings(postId).doc(uid);
@@ -161,12 +149,10 @@ class ForumService {
       int    count = (postSnap['ratingCount'] as num).toInt();
 
       if (ratingSnap.exists) {
-        // Replace old rating
-        final int oldRating =
+        final int old =
             (ratingSnap.data() as Map<String, dynamic>)['value'] as int;
-        sum = sum - oldRating + newRating;
+        sum = sum - old + newRating;
       } else {
-        // New rating
         sum   += newRating;
         count += 1;
       }
@@ -176,16 +162,15 @@ class ForumService {
     });
   }
 
-  // ── Reports ──────────────────────────────────────────────────────────────────
+  // ── Reports ───────────────────────────────────────────────────────────────
 
-  /// Check whether the current user has already reported this post.
   Future<bool> hasUserReported(String postId, String uid) async {
     final doc = await _reports(postId).doc(uid).get();
     return doc.exists;
   }
 
-  /// File a report. Creates an entry in the post's reports subcollection
-  /// AND in the top-level moderator_reports collection.
+  /// Files a report. Writes to the post's reports subcollection (dedup guard),
+  /// increments the post's reportCount, and adds to moderator_reports.
   Future<void> reportPost({
     required ForumPost post,
     required String    reporterUid,
@@ -194,21 +179,21 @@ class ForumService {
   }) async {
     final batch = _db.batch();
 
-    // Mark that this user has reported this post (prevents duplicates)
-    final userReportRef = _reports(post.id).doc(reporterUid);
-    batch.set(userReportRef, {
+    // Dedup guard — one doc per reporter per post
+    batch.set(_reports(post.id).doc(reporterUid), {
       'reason':    reason,
       'createdAt': Timestamp.fromDate(DateTime.now()),
     });
 
-    // Increment post reportCount
-    final postRef = _posts.doc(post.id);
-    batch.update(postRef, {'reportCount': FieldValue.increment(1)});
+    // Increment report counter on the post
+    batch.update(_posts.doc(post.id), {
+      'reportCount': FieldValue.increment(1),
+    });
 
-    // Add to moderator_reports
-    final modReportRef = _modReports.doc();
-    final report = ModeratorReport(
-      id:            modReportRef.id,
+    // Write to moderator_reports — this is what the dashboard reads
+    final modRef = _modReports.doc();
+    batch.set(modRef, ModeratorReport(
+      id:            modRef.id,
       postId:        post.id,
       postTitle:     post.title,
       postAuthorUid: post.authorUid,
@@ -217,43 +202,178 @@ class ForumService {
       reason:        reason,
       createdAt:     DateTime.now(),
       resolved:      false,
-    );
-    batch.set(modReportRef, report.toFirestore());
+    ).toFirestore());
 
     await batch.commit();
   }
 
-  // ── Moderator actions ─────────────────────────────────────────────────────────
+  // ── Moderator — reports ───────────────────────────────────────────────────
 
-  Stream<List<ModeratorReport>> modReportsStream({bool unresolvedOnly = true}) {
-    Query q = _modReports.orderBy('createdAt', descending: true);
-    if (unresolvedOnly) q = q.where('resolved', isEqualTo: false);
-    return q.snapshots().map(
-      (s) => s.docs.map(ModeratorReport.fromFirestore).toList(),
-    );
+  /// [resolvedOnly] = false → unresolved only
+  /// [resolvedOnly] = true  → resolved only
+  Stream<List<ModeratorReport>> modReportsStream({
+    required bool resolvedOnly,
+  }) {
+    return _modReports
+        .where('resolved', isEqualTo: resolvedOnly)
+        .orderBy('createdAt', descending: true)
+        .snapshots()
+        .map((s) => s.docs.map(ModeratorReport.fromFirestore).toList());
   }
 
   Future<void> resolveReport(String reportId) async {
     await _modReports.doc(reportId).update({'resolved': true});
   }
 
-  /// Moderator deletes a post and resolves all its open reports.
+  /// Deletes the post and resolves every open report that references it.
   Future<void> moderatorDeletePost(String postId) async {
     await deletePost(postId);
-    // Resolve all open reports for this post
-    final openReports = await _modReports
+    final open = await _modReports
         .where('postId',   isEqualTo: postId)
         .where('resolved', isEqualTo: false)
         .get();
+    if (open.docs.isEmpty) return;
     final batch = _db.batch();
-    for (final doc in openReports.docs) {
+    for (final doc in open.docs) {
       batch.update(doc.reference, {'resolved': true});
     }
     await batch.commit();
   }
 
-  /// Ban a user — sets a 'banned' flag on their user document.
+  // ── Moderator — users ─────────────────────────────────────────────────────
+
+  /// Stream of every user document, newest first.
+  Stream<List<AppUserRecord>> usersStream() {
+    return _users
+        .orderBy('createdAt', descending: true)
+        .snapshots()
+        .map((s) => s.docs.map(AppUserRecord.fromFirestore).toList());
+  }
+
+  /// Warn — minor infraction, status → 'warned' (unless already worse).
+  Future<void> warnUser(String uid) async {
+    await _applyInfraction(
+      uid:      uid,
+      severity: 'minor',
+      reason:   'Warning issued by moderator',
+      // Only upgrade status if currently active
+      newStatus: 'warned',
+      onlyIfStatus: ['active'],
+    );
+  }
+
+  /// Mute — minor infraction, cannot post/comment until [duration] elapses.
+  Future<void> muteUser(String uid, Duration duration) async {
+    await _applyInfraction(
+      uid:              uid,
+      severity:         'minor',
+      reason:           'Muted for ${_durationLabel(duration)}',
+      newStatus:        'muted',
+      restrictionEndsAt: DateTime.now().add(duration),
+    );
+  }
+
+  /// Suspend — major infraction, full account suspension.
+  Future<void> suspendUser(String uid, Duration duration) async {
+    await _applyInfraction(
+      uid:              uid,
+      severity:         'major',
+      reason:           'Suspended for ${_durationLabel(duration)}',
+      newStatus:        'suspended',
+      restrictionEndsAt: DateTime.now().add(duration),
+    );
+  }
+
+  /// Permanent ban — major infraction.
   Future<void> banUser(String uid) async {
-    await _db.collection('users').doc(uid).update({'banned': true});
+    await _applyInfraction(
+      uid:      uid,
+      severity: 'major',
+      reason:   'Permanently banned',
+      newStatus: 'banned',
+    );
+  }
+
+  /// Toggle shadow ban. Shadow-banned users can post normally but their
+  /// content is invisible to everyone else.
+  Future<void> shadowBanUser(String uid, {required bool enable}) async {
+    final update = <String, dynamic>{'shadowBanned': enable};
+    if (enable) {
+      final entry = {
+        'severity':  'major',
+        'reason':    'Shadow banned',
+        'createdAt': Timestamp.fromDate(DateTime.now()),
+      };
+      update['majorInfractions']  = FieldValue.increment(1);
+      update['infractionHistory'] = FieldValue.arrayUnion([entry]);
+    }
+    await _users.doc(uid).set(update, SetOptions(merge: true));
+  }
+
+  /// Restore — clear all restrictions, set status back to active.
+  Future<void> restoreUser(String uid) async {
+    await _users.doc(uid).set({
+      'status':            'active',
+      'shadowBanned':      false,
+      'restrictionEndsAt': FieldValue.delete(),
+    }, SetOptions(merge: true));
+  }
+
+  // ── Private helpers ───────────────────────────────────────────────────────
+
+  /// Shared logic for every punitive action. Uses [set + merge] so fields
+  /// are created on documents that pre-date the moderation system.
+  Future<void> _applyInfraction({
+    required String  uid,
+    required String  severity,
+    required String  reason,
+    required String  newStatus,
+    DateTime?        restrictionEndsAt,
+    /// If provided, only change status when current status is in this list.
+    List<String>?    onlyIfStatus,
+  }) async {
+    final entry = {
+      'severity':  severity,
+      'reason':    reason,
+      'createdAt': Timestamp.fromDate(DateTime.now()),
+    };
+
+    final isMajor = severity == 'major';
+    final counterField =
+        isMajor ? 'majorInfractions' : 'minorInfractions';
+
+    // If onlyIfStatus is set we need to read first and conditionally write.
+    if (onlyIfStatus != null) {
+      final snap = await _users.doc(uid).get();
+      final current = snap.exists
+          ? (snap.data() as Map<String, dynamic>)['status'] as String? ?? 'active'
+          : 'active';
+      if (!onlyIfStatus.contains(current)) {
+        // Status is already at a worse level — just log the infraction.
+        await _users.doc(uid).set({
+          counterField:        FieldValue.increment(1),
+          'infractionHistory': FieldValue.arrayUnion([entry]),
+        }, SetOptions(merge: true));
+        return;
+      }
+    }
+
+    final update = <String, dynamic>{
+      'status':            newStatus,
+      counterField:        FieldValue.increment(1),
+      'infractionHistory': FieldValue.arrayUnion([entry]),
+    };
+    if (restrictionEndsAt != null) {
+      update['restrictionEndsAt'] = Timestamp.fromDate(restrictionEndsAt);
+    }
+
+    // set + merge so this works even on users without these fields yet
+    await _users.doc(uid).set(update, SetOptions(merge: true));
+  }
+
+  String _durationLabel(Duration d) {
+    if (d.inDays >= 1)  return '${d.inDays} day${d.inDays == 1 ? '' : 's'}';
+    if (d.inHours >= 1) return '${d.inHours} hour${d.inHours == 1 ? '' : 's'}';
+    return '${d.inMinutes} minutes';
   }
 }

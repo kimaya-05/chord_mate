@@ -12,18 +12,14 @@ const List<String> _chromaticScale = [
   'C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B',
 ];
 
-/// Transposes a single chord name by [semitones] steps.
-/// Handles major, minor, 7th, sus etc. by splitting root from suffix.
 String transposeChord(String chord, int semitones) {
   if (chord.isEmpty) return chord;
-  // Match root note (e.g. C, C#, Db)
   final match = RegExp(r'^([A-G]#?b?)(.*)$').firstMatch(chord);
   if (match == null) return chord;
 
   String root   = match.group(1)!;
   String suffix = match.group(2)!;
 
-  // Normalise flats to sharps
   const Map<String, String> flatToSharp = {
     'Db': 'C#', 'Eb': 'D#', 'Gb': 'F#', 'Ab': 'G#', 'Bb': 'A#',
   };
@@ -36,13 +32,10 @@ String transposeChord(String chord, int semitones) {
   return '${_chromaticScale[newIdx]}$suffix';
 }
 
-/// Transposes every chord token in a full chord sheet content string.
 String transposeContent(String content, int semitones) {
   if (semitones == 0) return content;
-  final lines = content.split('\n');
-  return lines.map((line) {
+  return content.split('\n').map((line) {
     if (_isChordLine(line)) {
-      // Replace each chord token on the line
       return line.replaceAllMapped(
         RegExp(r'[A-G]#?b?(?:m|maj|min|dim|aug|sus|add|M)?(?:\d+)?(?:/[A-G]#?b?)?'),
         (m) => transposeChord(m.group(0)!, semitones),
@@ -52,21 +45,20 @@ String transposeContent(String content, int semitones) {
   }).join('\n');
 }
 
-/// A line is a chord line if it contains chord-like tokens and no long words.
 bool _isChordLine(String line) {
   if (line.trim().isEmpty) return false;
-  if (line.trim().startsWith('[')) return false; // section header
+  if (line.trim().startsWith('[')) return false;
   final tokens = line.trim().split(RegExp(r'\s+'));
   int chordCount = 0;
   for (final t in tokens) {
-    if (RegExp(r'^[A-G]#?b?(?:m|maj|min|dim|aug|sus|add|M)?(?:\d+)?(?:/[A-G]#?b?)?$')
-        .hasMatch(t)) {
-      chordCount++;
-    }
+    if (_chordTokenRegex.hasMatch(t)) chordCount++;
   }
-  // If more than half the tokens look like chords, treat as chord line
   return tokens.isNotEmpty && chordCount / tokens.length >= 0.5;
 }
+
+final _chordTokenRegex = RegExp(
+  r'^[A-G]#?b?(?:m|maj|min|dim|aug|sus|add|M)?(?:\d+)?(?:/[A-G]#?b?)?$',
+);
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Line types
@@ -98,6 +90,7 @@ List<_ParsedLine> _parseContent(String content) {
 class ChordSheetRenderer extends StatelessWidget {
   final String content;
   final int    transposeSemitones;
+  // Kept for API compatibility — diagrams are always on-demand via tap.
   final bool   showInlineDiagrams;
 
   const ChordSheetRenderer({
@@ -109,11 +102,9 @@ class ChordSheetRenderer extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final String transposed =
-        transposeContent(content, transposeSemitones);
+    final String transposed = transposeContent(content, transposeSemitones);
     final lines = _parseContent(transposed);
 
-    // Group chord + lyric pairs
     final List<Widget> widgets = [];
     int i = 0;
     while (i < lines.length) {
@@ -123,15 +114,13 @@ class ChordSheetRenderer extends StatelessWidget {
         widgets.add(_SectionHeader(text: line.raw.trim()));
         i++;
       } else if (line.type == _LineType.chord) {
-        // Check if next line is a lyric to pair them
         final String? lyricRaw =
             (i + 1 < lines.length && lines[i + 1].type == _LineType.lyric)
                 ? lines[i + 1].raw
                 : null;
         widgets.add(_ChordLyricRow(
-          chordLine:          line.raw,
-          lyricLine:          lyricRaw,
-          showInlineDiagrams: showInlineDiagrams,
+          chordLine: line.raw,
+          lyricLine: lyricRaw,
         ));
         i += lyricRaw != null ? 2 : 1;
       } else if (line.type == _LineType.lyric) {
@@ -158,162 +147,416 @@ class _SectionHeader extends StatelessWidget {
   final String text;
   const _SectionHeader({required this.text});
 
+  String get _label {
+    final t = text.trim();
+    if (t.startsWith('[') && t.endsWith(']')) {
+      return t.substring(1, t.length - 1).toUpperCase();
+    }
+    return t.toUpperCase();
+  }
+
   @override
   Widget build(BuildContext context) {
     return Padding(
-      padding: const EdgeInsets.only(top: 20, bottom: 6),
-      child: Text(
-        text,
-        style: const TextStyle(
-          fontSize: 13,
-          fontWeight: FontWeight.w700,
-          color: Colors.greenAccent,
-          letterSpacing: 0.5,
+      padding: const EdgeInsets.only(top: 24, bottom: 8),
+      child: Row(
+        children: [
+          Container(
+            width: 3,
+            height: 14,
+            decoration: BoxDecoration(
+              color: Colors.greenAccent,
+              borderRadius: BorderRadius.circular(2),
+            ),
+          ),
+          const SizedBox(width: 8),
+          Text(
+            _label,
+            style: const TextStyle(
+              fontSize: 11,
+              fontWeight: FontWeight.w800,
+              color: Colors.greenAccent,
+              letterSpacing: 1.6,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// _ChordLyricRow
+// ─────────────────────────────────────────────────────────────────────────────
+
+class _ChordLyricRow extends StatelessWidget {
+  final String  chordLine;
+  final String? lyricLine;
+
+  const _ChordLyricRow({
+    required this.chordLine,
+    required this.lyricLine,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 6),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          _ChordChipsRow(chordLine: chordLine),
+          if (lyricLine != null) ...[
+            const SizedBox(height: 1),
+            _LyricLine(text: lyricLine!),
+          ],
+        ],
+      ),
+    );
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// _ChordChipsRow
+// Walks the chord line and emits a chip for every chord token and a
+// proportional SizedBox for every whitespace run, preserving horizontal
+// alignment with the lyric line underneath.
+// ─────────────────────────────────────────────────────────────────────────────
+
+class _ChordChipsRow extends StatelessWidget {
+  final String chordLine;
+
+  // Must match the monospace fontSize used in _LyricLine so spacing aligns.
+  static const double _charWidth = 8.41; // monospace 14px ≈ 8.41px/char
+
+  const _ChordChipsRow({required this.chordLine});
+
+  @override
+  Widget build(BuildContext context) {
+    final segments = _tokenise(chordLine);
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.end,
+      mainAxisSize: MainAxisSize.min,
+      children: segments.map((seg) {
+        if (seg.isChord) {
+          return _ChordChip(
+            label: seg.text,
+            onTap: () => _showChordBottomSheet(context, seg.text),
+          );
+        }
+        return SizedBox(width: seg.text.length * _charWidth);
+      }).toList(),
+    );
+  }
+
+  List<({bool isChord, String text})> _tokenise(String line) {
+    final result = <({bool isChord, String text})>[];
+    final re = RegExp(
+      r'([A-G]#?b?(?:m|maj|min|dim|aug|sus|add|M)?(?:\d+)?(?:/[A-G]#?b?)?)|(\s+)',
+    );
+    int cursor = 0;
+    for (final m in re.allMatches(line)) {
+      if (m.start > cursor) {
+        result.add((isChord: false, text: line.substring(cursor, m.start)));
+      }
+      if (m.group(1) != null) {
+        result.add((isChord: true, text: m.group(1)!));
+      } else if (m.group(2) != null) {
+        result.add((isChord: false, text: m.group(2)!));
+      }
+      cursor = m.end;
+    }
+    if (cursor < line.length) {
+      result.add((isChord: false, text: line.substring(cursor)));
+    }
+    return result;
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Bottom sheet
+// ─────────────────────────────────────────────────────────────────────────────
+
+void _showChordBottomSheet(BuildContext context, String token) {
+  PracticeChord? pc;
+  try {
+    pc = practiceChords.firstWhere(
+      (c) => c.displayName.toLowerCase() == token.toLowerCase(),
+    );
+  } catch (_) {}
+
+  showModalBottomSheet(
+    context: context,
+    backgroundColor: const Color(0xFF13131A),
+    isScrollControlled: true,
+    shape: const RoundedRectangleBorder(
+      borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+    ),
+    builder: (_) => pc != null
+        ? _ChordDiagramSheet(chord: pc!)
+        : _NoChordSheet(token: token),
+  );
+}
+
+// ── Full sheet with diagram + voicing switcher ────────────────────────────────
+
+class _ChordDiagramSheet extends StatefulWidget {
+  final PracticeChord chord;
+  const _ChordDiagramSheet({required this.chord});
+
+  @override
+  State<_ChordDiagramSheet> createState() => _ChordDiagramSheetState();
+}
+
+class _ChordDiagramSheetState extends State<_ChordDiagramSheet> {
+  int _voicingIndex = 0;
+
+  @override
+  Widget build(BuildContext context) {
+    final voicings = widget.chord.voicings;
+    final current  = voicings[_voicingIndex];
+
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(24, 16, 24, 36),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          // Handle
+          Container(
+            width: 36, height: 4,
+            decoration: BoxDecoration(
+              color: Colors.white24,
+              borderRadius: BorderRadius.circular(2),
+            ),
+          ),
+          const SizedBox(height: 20),
+
+          // Chord name
+          Text(
+            widget.chord.fullName,
+            style: const TextStyle(
+              fontSize: 22,
+              fontWeight: FontWeight.w800,
+              color: Colors.white,
+            ),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            current.label,
+            style: TextStyle(
+              fontSize: 12,
+              color: Colors.white.withOpacity(0.4),
+            ),
+          ),
+          const SizedBox(height: 20),
+
+          // Diagram
+          ChordDiagramWidget(
+            chord:    current.data,
+            size:     ChordDiagramSize.large,
+            showName: false,
+          ),
+
+          // Voicing switcher — only shown when multiple voicings exist
+          if (voicings.length > 1) ...[
+            const SizedBox(height: 20),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                _VoicingNavButton(
+                  icon:    Icons.chevron_left_rounded,
+                  enabled: _voicingIndex > 0,
+                  onTap:   () => setState(() => _voicingIndex--),
+                ),
+                const SizedBox(width: 16),
+                Text(
+                  '${_voicingIndex + 1} / ${voicings.length}',
+                  style: TextStyle(
+                    fontSize: 12,
+                    color: Colors.white.withOpacity(0.4),
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+                const SizedBox(width: 16),
+                _VoicingNavButton(
+                  icon:    Icons.chevron_right_rounded,
+                  enabled: _voicingIndex < voicings.length - 1,
+                  onTap:   () => setState(() => _voicingIndex++),
+                ),
+              ],
+            ),
+            const SizedBox(height: 4),
+            Text(
+              'Voicings',
+              style: TextStyle(
+                fontSize: 11,
+                color: Colors.white.withOpacity(0.25),
+                letterSpacing: 0.8,
+              ),
+            ),
+          ],
+
+          const SizedBox(height: 24),
+
+          // Practice button
+          GestureDetector(
+            onTap: () {
+              Navigator.pop(context);
+              Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (_) => ChordDetailPage(chord: widget.chord),
+                ),
+              );
+            },
+            child: Container(
+              width: double.infinity,
+              padding: const EdgeInsets.symmetric(vertical: 14),
+              decoration: BoxDecoration(
+                color: Colors.greenAccent.withOpacity(0.1),
+                borderRadius: BorderRadius.circular(14),
+                border: Border.all(
+                  color: Colors.greenAccent.withOpacity(0.4),
+                ),
+              ),
+              child: const Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Text(
+                    'Practice this chord',
+                    style: TextStyle(
+                      fontSize: 14,
+                      fontWeight: FontWeight.w600,
+                      color: Colors.greenAccent,
+                    ),
+                  ),
+                  SizedBox(width: 6),
+                  Icon(Icons.arrow_forward_rounded,
+                      size: 16, color: Colors.greenAccent),
+                ],
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+// ── Fallback — no diagram available ──────────────────────────────────────────
+
+class _NoChordSheet extends StatelessWidget {
+  final String token;
+  const _NoChordSheet({required this.token});
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(24, 16, 24, 36),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Container(
+            width: 36, height: 4,
+            decoration: BoxDecoration(
+              color: Colors.white24,
+              borderRadius: BorderRadius.circular(2),
+            ),
+          ),
+          const SizedBox(height: 24),
+          Text(
+            token,
+            style: const TextStyle(
+              fontSize: 36,
+              fontWeight: FontWeight.w800,
+              color: Colors.greenAccent,
+            ),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            'No diagram available for this chord yet.',
+            style: TextStyle(
+              fontSize: 13,
+              color: Colors.white.withOpacity(0.4),
+            ),
+          ),
+          const SizedBox(height: 24),
+        ],
+      ),
+    );
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Small helpers
+// ─────────────────────────────────────────────────────────────────────────────
+
+class _VoicingNavButton extends StatelessWidget {
+  final IconData     icon;
+  final bool         enabled;
+  final VoidCallback onTap;
+  const _VoicingNavButton({
+    required this.icon,
+    required this.enabled,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: enabled ? onTap : null,
+      child: Container(
+        width: 32, height: 32,
+        decoration: BoxDecoration(
+          color: enabled
+              ? Colors.white.withOpacity(0.07)
+              : Colors.transparent,
+          borderRadius: BorderRadius.circular(8),
+          border: Border.all(
+            color: enabled
+                ? Colors.white.withOpacity(0.15)
+                : Colors.white.withOpacity(0.06),
+          ),
+        ),
+        child: Icon(
+          icon,
+          size: 20,
+          color: enabled ? Colors.white70 : Colors.white24,
         ),
       ),
     );
   }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// _ChordLyricRow — chord tokens above the lyric line
-// ─────────────────────────────────────────────────────────────────────────────
-
-class _ChordLyricRow extends StatelessWidget {
-  final String  chordLine;
-  final String? lyricLine;
-  final bool    showInlineDiagrams;
-
-  const _ChordLyricRow({
-    required this.chordLine,
-    required this.lyricLine,
-    required this.showInlineDiagrams,
-  });
+class _ChordChip extends StatelessWidget {
+  final String       label;
+  final VoidCallback onTap;
+  const _ChordChip({required this.label, required this.onTap});
 
   @override
   Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 4),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          // Chord line
-          Text(
-            chordLine,
-            style: const TextStyle(
-              fontSize: 14,
-              fontWeight: FontWeight.w700,
-              color: Colors.greenAccent,
-              fontFamily: 'monospace',
-              height: 1.4,
-            ),
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+        decoration: BoxDecoration(
+          color: Colors.greenAccent.withOpacity(0.1),
+          borderRadius: BorderRadius.circular(6),
+          border: Border.all(color: Colors.greenAccent.withOpacity(0.35)),
+        ),
+        child: Text(
+          label,
+          style: const TextStyle(
+            fontSize: 13,
+            fontWeight: FontWeight.w700,
+            color: Colors.greenAccent,
+            fontFamily: 'monospace',
           ),
-          // Lyric line (if any)
-          if (lyricLine != null)
-            Text(
-              lyricLine!,
-              style: TextStyle(
-                fontSize: 14,
-                color: Colors.white.withOpacity(0.85),
-                fontFamily: 'monospace',
-                height: 1.4,
-              ),
-            ),
-          // Inline chord diagrams
-          if (showInlineDiagrams) _buildInlineDiagrams(context),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildInlineDiagrams(BuildContext context) {
-    // Extract unique chord tokens from the chord line
-    final tokens = chordLine
-        .trim()
-        .split(RegExp(r'\s+'))
-        .where((t) =>
-            RegExp(r'^[A-G]#?b?(?:m|maj|min|dim|aug|sus|add|M)?(?:\d+)?(?:/[A-G]#?b?)?$')
-                .hasMatch(t))
-        .toSet()
-        .toList();
-
-    if (tokens.isEmpty) return const SizedBox.shrink();
-
-    // Find matching PracticeChord or ChordData for each token
-    final List<Widget> diagrams = [];
-    for (final token in tokens) {
-      // Try to find in practiceChords first
-      PracticeChord? pc;
-      try {
-        pc = practiceChords.firstWhere(
-          (c) => c.displayName.toLowerCase() == token.toLowerCase(),
-        );
-      } catch (_) {}
-
-      if (pc != null) {
-        diagrams.add(
-          GestureDetector(
-            onTap: () => Navigator.push(
-              context,
-              MaterialPageRoute(
-                builder: (_) => ChordDetailPage(chord: pc!),
-              ),
-            ),
-            child: Padding(
-              padding: const EdgeInsets.only(right: 12),
-              child: Column(
-                children: [
-                  ChordDiagramWidget(
-                    chord:    pc.voicings.first.data,
-                    size:     ChordDiagramSize.small,
-                    showName: true,
-                  ),
-                ],
-              ),
-            ),
-          ),
-        );
-      } else {
-        // Just show the chord name as a badge if no diagram available
-        diagrams.add(
-          Container(
-            margin: const EdgeInsets.only(right: 8),
-            padding:
-                const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-            decoration: BoxDecoration(
-              color: Colors.greenAccent.withOpacity(0.08),
-              borderRadius: BorderRadius.circular(6),
-              border:
-                  Border.all(color: Colors.greenAccent.withOpacity(0.2)),
-            ),
-            child: Text(
-              token,
-              style: const TextStyle(
-                fontSize: 11,
-                color: Colors.greenAccent,
-                fontWeight: FontWeight.w600,
-              ),
-            ),
-          ),
-        );
-      }
-    }
-
-    if (diagrams.isEmpty) return const SizedBox.shrink();
-
-    return Padding(
-      padding: const EdgeInsets.only(top: 6, bottom: 4),
-      child: SingleChildScrollView(
-        scrollDirection: Axis.horizontal,
-        child: Row(children: diagrams),
+        ),
       ),
     );
   }
 }
-
-// ─────────────────────────────────────────────────────────────────────────────
-// _LyricLine
-// ─────────────────────────────────────────────────────────────────────────────
 
 class _LyricLine extends StatelessWidget {
   final String text;
@@ -321,16 +564,13 @@ class _LyricLine extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 2),
-      child: Text(
-        text,
-        style: TextStyle(
-          fontSize: 14,
-          color: Colors.white.withOpacity(0.85),
-          fontFamily: 'monospace',
-          height: 1.4,
-        ),
+    return Text(
+      text,
+      style: TextStyle(
+        fontSize: 14,
+        color: Colors.white.withOpacity(0.85),
+        fontFamily: 'monospace',
+        height: 1.4,
       ),
     );
   }

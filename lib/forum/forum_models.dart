@@ -22,21 +22,21 @@ const List<String> kKeys = [
 // ─────────────────────────────────────────────────────────────────────────────
 
 class ForumPost {
-  final String    id;
-  final String    authorUid;
-  final String    authorName;
-  final String    title;
-  final String    artist;
-  final String    key;
-  final int       capo;
-  final String    difficulty;
-  final String    genre;
-  final String    content;   // raw chord sheet text
-  final double    ratingSum;
-  final int       ratingCount;
-  final int       reportCount;
-  final DateTime  createdAt;
-  final DateTime  updatedAt;
+  final String   id;
+  final String   authorUid;
+  final String   authorName;
+  final String   title;
+  final String   artist;
+  final String   key;
+  final int      capo;
+  final String   difficulty;
+  final String   genre;
+  final String   content;
+  final double   ratingSum;
+  final int      ratingCount;
+  final int      reportCount;
+  final DateTime createdAt;
+  final DateTime updatedAt;
 
   const ForumPost({
     required this.id,
@@ -65,20 +65,20 @@ class ForumPost {
     final d = doc.data() as Map<String, dynamic>;
     return ForumPost(
       id:          doc.id,
-      authorUid:   d['authorUid']   as String? ?? '',
-      authorName:  d['authorName']  as String? ?? 'Unknown',
-      title:       d['title']       as String? ?? '',
-      artist:      d['artist']      as String? ?? '',
-      key:         d['key']         as String? ?? 'C',
-      capo:        (d['capo']       as num?)?.toInt() ?? 0,
-      difficulty:  d['difficulty']  as String? ?? 'Beginner',
-      genre:       d['genre']       as String? ?? 'Pop',
-      content:     d['content']     as String? ?? '',
-      ratingSum:   (d['ratingSum']  as num?)?.toDouble() ?? 0,
+      authorUid:   d['authorUid']    as String? ?? '',
+      authorName:  d['authorName']   as String? ?? 'Unknown',
+      title:       d['title']        as String? ?? '',
+      artist:      d['artist']       as String? ?? '',
+      key:         d['key']          as String? ?? 'C',
+      capo:        (d['capo']        as num?)?.toInt() ?? 0,
+      difficulty:  d['difficulty']   as String? ?? 'Beginner',
+      genre:       d['genre']        as String? ?? 'Pop',
+      content:     d['content']      as String? ?? '',
+      ratingSum:   (d['ratingSum']   as num?)?.toDouble() ?? 0,
       ratingCount: (d['ratingCount'] as num?)?.toInt() ?? 0,
       reportCount: (d['reportCount'] as num?)?.toInt() ?? 0,
-      createdAt:   (d['createdAt']  as Timestamp?)?.toDate() ?? DateTime.now(),
-      updatedAt:   (d['updatedAt']  as Timestamp?)?.toDate() ?? DateTime.now(),
+      createdAt:   (d['createdAt']   as Timestamp?)?.toDate() ?? DateTime.now(),
+      updatedAt:   (d['updatedAt']   as Timestamp?)?.toDate() ?? DateTime.now(),
     );
   }
 
@@ -139,7 +139,7 @@ class ForumComment {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// ModeratorReport — top-level collection for mod dashboard
+// ModeratorReport
 // ─────────────────────────────────────────────────────────────────────────────
 
 class ModeratorReport {
@@ -169,14 +169,14 @@ class ModeratorReport {
     final d = doc.data() as Map<String, dynamic>;
     return ModeratorReport(
       id:            doc.id,
-      postId:        d['postId']       as String? ?? '',
-      postTitle:     d['postTitle']    as String? ?? '',
+      postId:        d['postId']        as String? ?? '',
+      postTitle:     d['postTitle']     as String? ?? '',
       postAuthorUid: d['postAuthorUid'] as String? ?? '',
-      reporterUid:   d['reporterUid']  as String? ?? '',
-      reporterName:  d['reporterName'] as String? ?? 'Unknown',
-      reason:        d['reason']       as String? ?? '',
-      createdAt:     (d['createdAt']   as Timestamp?)?.toDate() ?? DateTime.now(),
-      resolved:      d['resolved']     as bool? ?? false,
+      reporterUid:   d['reporterUid']   as String? ?? '',
+      reporterName:  d['reporterName']  as String? ?? 'Unknown',
+      reason:        d['reason']        as String? ?? '',
+      createdAt:     (d['createdAt']    as Timestamp?)?.toDate() ?? DateTime.now(),
+      resolved:      d['resolved']      as bool? ?? false,
     );
   }
 
@@ -190,4 +190,111 @@ class ModeratorReport {
     'createdAt':     Timestamp.fromDate(createdAt),
     'resolved':      resolved,
   };
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// InfractionRecord — one entry in a user's moderation history
+// ─────────────────────────────────────────────────────────────────────────────
+
+class InfractionRecord {
+  final String   id;
+  /// 'major' | 'minor'
+  final String   severity;
+  final String   reason;
+  final DateTime createdAt;
+
+  const InfractionRecord({
+    required this.id,
+    required this.severity,
+    required this.reason,
+    required this.createdAt,
+  });
+
+  factory InfractionRecord.fromMap(String id, Map<String, dynamic> d) {
+    return InfractionRecord(
+      id:        id,
+      severity:  d['severity']  as String? ?? 'minor',
+      reason:    d['reason']    as String? ?? '',
+      createdAt: (d['createdAt'] as Timestamp?)?.toDate() ?? DateTime.now(),
+    );
+  }
+
+  Map<String, dynamic> toMap() => {
+    'severity':  severity,
+    'reason':    reason,
+    'createdAt': Timestamp.fromDate(createdAt),
+  };
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// AppUserRecord — user document as seen by moderators
+//
+// Fields that exist at signup:  displayName, email, role, createdAt
+// Fields written on first mod action: status, shadowBanned, postCount,
+//   majorInfractions, minorInfractions, infractionHistory
+// All moderation fields default gracefully if absent.
+// ─────────────────────────────────────────────────────────────────────────────
+
+class AppUserRecord {
+  final String                 uid;
+  final String                 displayName;
+  final String                 email;
+  final String                 role;
+  /// 'active' | 'warned' | 'muted' | 'suspended' | 'banned'
+  final String                 status;
+  final bool                   shadowBanned;
+  final int                    postCount;
+  final int                    majorInfractions;
+  final int                    minorInfractions;
+  /// Timestamp at signup — maps to Firestore field 'createdAt'
+  final DateTime               joinedAt;
+  /// Non-null while a timed mute/suspension is active
+  final DateTime?              restrictionEndsAt;
+  final List<InfractionRecord> infractionHistory;
+
+  const AppUserRecord({
+    required this.uid,
+    required this.displayName,
+    required this.email,
+    required this.role,
+    required this.status,
+    required this.shadowBanned,
+    required this.postCount,
+    required this.majorInfractions,
+    required this.minorInfractions,
+    required this.joinedAt,
+    required this.restrictionEndsAt,
+    required this.infractionHistory,
+  });
+
+  factory AppUserRecord.fromFirestore(DocumentSnapshot doc) {
+    final d = doc.data() as Map<String, dynamic>;
+
+    // infractionHistory is stored as an array of maps on the user doc.
+    // Defaults to empty list if the field hasn't been written yet.
+    final rawHistory = d['infractionHistory'] as List<dynamic>? ?? [];
+    final history = rawHistory.asMap().entries.map((e) {
+      return InfractionRecord.fromMap(
+        e.key.toString(),
+        Map<String, dynamic>.from(e.value as Map),
+      );
+    }).toList();
+
+    return AppUserRecord(
+      uid:               doc.id,
+      displayName:       d['displayName']       as String? ?? 'Unknown',
+      email:             d['email']             as String? ?? '',
+      role:              d['role']              as String? ?? 'user',
+      // All fields below may be absent on users created before mod system
+      status:            d['status']            as String? ?? 'active',
+      shadowBanned:      d['shadowBanned']      as bool?   ?? false,
+      postCount:         (d['postCount']        as num?)?.toInt() ?? 0,
+      majorInfractions:  (d['majorInfractions'] as num?)?.toInt() ?? 0,
+      minorInfractions:  (d['minorInfractions'] as num?)?.toInt() ?? 0,
+      // Firestore field is 'createdAt' — this is the signup timestamp
+      joinedAt:          (d['createdAt']        as Timestamp?)?.toDate() ?? DateTime.now(),
+      restrictionEndsAt: (d['restrictionEndsAt'] as Timestamp?)?.toDate(),
+      infractionHistory: history,
+    );
+  }
 }
