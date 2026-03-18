@@ -35,6 +35,8 @@ class ForumPost {
   final double   ratingSum;
   final int      ratingCount;
   final int      reportCount;
+  /// Set to true when the post author is shadow-banned so feeds can filter it.
+  final bool     authorShadowBanned;
   final DateTime createdAt;
   final DateTime updatedAt;
 
@@ -52,6 +54,7 @@ class ForumPost {
     required this.ratingSum,
     required this.ratingCount,
     required this.reportCount,
+    this.authorShadowBanned = false,
     required this.createdAt,
     required this.updatedAt,
   });
@@ -76,7 +79,8 @@ class ForumPost {
       content:     d['content']      as String? ?? '',
       ratingSum:   (d['ratingSum']   as num?)?.toDouble() ?? 0,
       ratingCount: (d['ratingCount'] as num?)?.toInt() ?? 0,
-      reportCount: (d['reportCount'] as num?)?.toInt() ?? 0,
+      reportCount:        (d['reportCount']        as num?)?.toInt() ?? 0,
+      authorShadowBanned: d['authorShadowBanned']  as bool? ?? false,
       createdAt:   (d['createdAt']   as Timestamp?)?.toDate() ?? DateTime.now(),
       updatedAt:   (d['updatedAt']   as Timestamp?)?.toDate() ?? DateTime.now(),
     );
@@ -94,7 +98,8 @@ class ForumPost {
     'content':     content,
     'ratingSum':   ratingSum,
     'ratingCount': ratingCount,
-    'reportCount': reportCount,
+    'reportCount':        reportCount,
+    'authorShadowBanned': authorShadowBanned,
     'createdAt':   Timestamp.fromDate(createdAt),
     'updatedAt':   Timestamp.fromDate(updatedAt),
   };

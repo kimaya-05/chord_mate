@@ -23,19 +23,19 @@ class ForumService {
 
   // ── Posts — read ──────────────────────────────────────────────────────────
 
-  Stream<List<ForumPost>> postsStream({
-    String? genre,
-    String? difficulty,
-    String? key,
-  }) {
-    Query q = _posts.orderBy('createdAt', descending: true);
-    if (genre      != null) q = q.where('genre',      isEqualTo: genre);
-    if (difficulty != null) q = q.where('difficulty', isEqualTo: difficulty);
-    if (key        != null) q = q.where('key',        isEqualTo: key);
-    return q.snapshots().map(
-      (s) => s.docs.map(ForumPost.fromFirestore).toList(),
-    );
-  }
+  // Stream<List<ForumPost>> postsStream({
+  //   String? genre,
+  //   String? difficulty,
+  //   String? key,
+  // }) {
+  //   Query q = _posts.orderBy('createdAt', descending: true);
+  //   if (genre      != null) q = q.where('genre',      isEqualTo: genre);
+  //   if (difficulty != null) q = q.where('difficulty', isEqualTo: difficulty);
+  //   if (key        != null) q = q.where('key',        isEqualTo: key);
+  //   return q.snapshots().map(
+  //     (s) => s.docs.map(ForumPost.fromFirestore).toList(),
+  //   );
+  // }
 
   Future<List<ForumPost>> searchPosts(String query) async {
     final snap = await _posts.orderBy('createdAt', descending: true).get();
@@ -85,8 +85,47 @@ class ForumService {
 
   // ── Posts — write ─────────────────────────────────────────────────────────
 
-  Future<String> createPost(ForumPost post) async {
-    final ref = await _posts.add(post.toFirestore());
+  /// Stream of posts. For regular users, shadow-banned authors' posts are
+  /// filtered out. Moderators see everything.
+  Stream<List<ForumPost>> postsStream({
+    String? genre,
+    String? difficulty,
+    String? key,
+    bool    isModerator = false,
+  }) {
+    Query q = _posts.orderBy('createdAt', descending: true);
+    if (genre      != null) q = q.where('genre',      isEqualTo: genre);
+    if (difficulty != null) q = q.where('difficulty', isEqualTo: difficulty);
+    if (key        != null) q = q.where('key',        isEqualTo: key);
+    return q.snapshots().map((s) {
+      final all = s.docs.map(ForumPost.fromFirestore).toList();
+      if (isModerator) return all;
+      // Filter out posts by shadow-banned users for regular users
+      return all
+          .where((p) => !(p.authorShadowBanned))
+          .toList();
+    });
+  }
+
+  /// Creates a post. Throws [StateError] if the user is shadow-banned
+  /// or otherwise not allowed to post.
+  Future<String> createPost(ForumPost post, {bool canPost = true}) async {
+    if (!canPost) {
+      throw StateError('User is not permitted to post.');
+    }
+    // Check if the author is currently shadow-banned and stamp the post
+    // so the feed filter catches it immediately.
+    final userDoc = await _users.doc(post.authorUid).get();
+    final isShadowBanned = userDoc.exists
+        ? (userDoc.data() as Map<String, dynamic>)['shadowBanned'] as bool? ?? false
+        : false;
+
+    final data = {
+      ...post.toFirestore(),
+      'authorShadowBanned': isShadowBanned,
+    };
+
+    final ref = await _posts.add(data);
     return ref.id;
   }
 
@@ -296,18 +335,35 @@ class ForumService {
 
   /// Toggle shadow ban. Shadow-banned users can post normally but their
   /// content is invisible to everyone else.
+  /// Also stamps/clears [authorShadowBanned] on all of the user's posts
+  /// so [postsStream] can filter them without a per-post user fetch.
   Future<void> shadowBanUser(String uid, {required bool enable}) async {
-    final update = <String, dynamic>{'shadowBanned': enable};
+    final userUpdate = <String, dynamic>{'shadowBanned': enable};
     if (enable) {
       final entry = {
         'severity':  'major',
         'reason':    'Shadow banned',
         'createdAt': Timestamp.fromDate(DateTime.now()),
       };
-      update['majorInfractions']  = FieldValue.increment(1);
-      update['infractionHistory'] = FieldValue.arrayUnion([entry]);
+      userUpdate['majorInfractions']  = FieldValue.increment(1);
+      userUpdate['infractionHistory'] = FieldValue.arrayUnion([entry]);
     }
-    await _users.doc(uid).set(update, SetOptions(merge: true));
+    await _users.doc(uid).set(userUpdate, SetOptions(merge: true));
+
+    // Stamp all of this user's posts so the feed filter works immediately.
+    final userPosts = await _posts
+        .where('authorUid', isEqualTo: uid)
+        .get();
+    if (userPosts.docs.isEmpty) return;
+    // Firestore batch limit is 500 writes
+    for (int i = 0; i < userPosts.docs.length; i += 500) {
+      final batch = _db.batch();
+      final chunk = userPosts.docs.skip(i).take(500);
+      for (final doc in chunk) {
+        batch.update(doc.reference, {'authorShadowBanned': enable});
+      }
+      await batch.commit();
+    }
   }
 
   /// Restore — clear all restrictions, set status back to active.

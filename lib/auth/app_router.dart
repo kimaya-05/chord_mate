@@ -11,80 +11,7 @@ import '../ui/guitar_tuner_page.dart';
 import '../forum/moderator_dashboard_page.dart';
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Placeholder screens — replace with your real pages.
-// ─────────────────────────────────────────────────────────────────────────────
-
-// class UserHomePage extends StatelessWidget {
-//   const UserHomePage({super.key});
-//   @override
-//   Widget build(BuildContext context) => const _PlaceholderPage(
-//         label: 'Home',
-//         icon: Icons.music_note,
-//       );
-// }
-
-// class ModeratorDashboardPage extends StatelessWidget {
-//   const ModeratorDashboardPage({super.key});
-//   @override
-//   Widget build(BuildContext context) => const _PlaceholderPage(
-//         label: 'Moderator Dashboard',
-//         icon: Icons.admin_panel_settings,
-//       );
-// }
-
-class _PlaceholderPage extends StatelessWidget {
-  final String label;
-  final IconData icon;
-  const _PlaceholderPage({required this.label, required this.icon});
-
-  @override
-  Widget build(BuildContext context) {
-    final auth = context.watch<AuthProvider>();
-    return Scaffold(
-      appBar: AppBar(
-        title: Text(label),
-        actions: [
-          IconButton(
-            icon: const Icon(Icons.logout),
-            tooltip: 'Sign out',
-            onPressed: () => auth.signOut(),
-          ),
-        ],
-      ),
-      body: Center(
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Icon(icon, size: 64, color: Colors.white24),
-            const SizedBox(height: 16),
-            Text(label,
-                style: const TextStyle(
-                    fontSize: 20, fontWeight: FontWeight.w600)),
-            const SizedBox(height: 8),
-            Text(
-              'Signed in as ${auth.appUser?.displayName ?? '—'}\n'
-              'Role: ${auth.role.name}',
-              textAlign: TextAlign.center,
-              style: const TextStyle(color: Colors.grey),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// AppRouter  — the single widget that decides what to show.
-//
-// Mount this as the home of your MaterialApp:
-//
-//   MaterialApp(
-//     home: const AppRouter(),
-//     ...
-//   )
-//
-// or via routes if you prefer named routing — AppRouter works either way.
+// AppRouter — single widget that decides what to show based on auth state.
 // ─────────────────────────────────────────────────────────────────────────────
 
 class AppRouter extends StatelessWidget {
@@ -104,15 +31,224 @@ class AppRouter extends StatelessWidget {
       return const LoginPage();
     }
 
-    // Signed in → route by role.
+    // Signed in but banned — hard block, cannot proceed.
+    if (auth.isBanned) {
+      return const _BannedScreen();
+    }
+
+    // Signed in but suspended — time-limited block.
+    if (auth.isSuspended) {
+      return _SuspendedScreen(
+        endsAt: auth.appUser?.restrictionEndsAt,
+      );
+    }
+
+    // Signed in and allowed → route by role.
     return auth.isModerator
-      ? const ModeratorDashboardPage()
-      : const MainShell();
+        ? const ModeratorDashboardPage()
+        : const MainShell();
   }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Splash / loading screen shown while Firebase resolves auth state.
+// _BannedScreen
+// ─────────────────────────────────────────────────────────────────────────────
+
+class _BannedScreen extends StatelessWidget {
+  const _BannedScreen();
+
+  @override
+  Widget build(BuildContext context) {
+    final auth = context.read<AuthProvider>();
+    return Scaffold(
+      backgroundColor: const Color(0xFF0A0A0F),
+      body: SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.all(32),
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Container(
+                width: 80, height: 80,
+                decoration: BoxDecoration(
+                  color: Colors.redAccent.withOpacity(0.12),
+                  shape: BoxShape.circle,
+                  border: Border.all(
+                      color: Colors.redAccent.withOpacity(0.4), width: 1.5),
+                ),
+                child: const Icon(Icons.block_rounded,
+                    size: 38, color: Colors.redAccent),
+              ),
+              const SizedBox(height: 28),
+              const Text(
+                'Account Banned',
+                style: TextStyle(
+                    fontSize: 22,
+                    fontWeight: FontWeight.w800,
+                    color: Colors.white),
+              ),
+              const SizedBox(height: 12),
+              Text(
+                'Your account has been permanently banned '
+                'for violating our community guidelines.',
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                    fontSize: 14,
+                    color: Colors.white.withOpacity(0.5),
+                    height: 1.5),
+              ),
+              const SizedBox(height: 40),
+              GestureDetector(
+                onTap: () => auth.signOut(),
+                child: Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.symmetric(vertical: 14),
+                  decoration: BoxDecoration(
+                    color: Colors.white.withOpacity(0.06),
+                    borderRadius: BorderRadius.circular(14),
+                    border: Border.all(color: Colors.white12),
+                  ),
+                  child: const Text(
+                    'Sign out',
+                    textAlign: TextAlign.center,
+                    style: TextStyle(
+                        fontSize: 15,
+                        fontWeight: FontWeight.w600,
+                        color: Colors.white54),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// _SuspendedScreen
+// ─────────────────────────────────────────────────────────────────────────────
+
+class _SuspendedScreen extends StatelessWidget {
+  final DateTime? endsAt;
+  const _SuspendedScreen({this.endsAt});
+
+  String get _timeRemaining {
+    if (endsAt == null || endsAt!.isBefore(DateTime.now())) return '';
+    final diff = endsAt!.difference(DateTime.now());
+    if (diff.inDays >= 1) {
+      return '${diff.inDays} day${diff.inDays == 1 ? '' : 's'} remaining';
+    }
+    if (diff.inHours >= 1) {
+      return '${diff.inHours} hour${diff.inHours == 1 ? '' : 's'} remaining';
+    }
+    if (diff.inMinutes >= 1) {
+      return '${diff.inMinutes} minute${diff.inMinutes == 1 ? '' : 's'} remaining';
+    }
+    return 'less than a minute remaining';
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final auth = context.read<AuthProvider>();
+    return Scaffold(
+      backgroundColor: const Color(0xFF0A0A0F),
+      body: SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.all(32),
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Container(
+                width: 80, height: 80,
+                decoration: BoxDecoration(
+                  color: Colors.orangeAccent.withOpacity(0.12),
+                  shape: BoxShape.circle,
+                  border: Border.all(
+                      color: Colors.orangeAccent.withOpacity(0.4),
+                      width: 1.5),
+                ),
+                child: const Icon(Icons.pause_circle_outline_rounded,
+                    size: 38, color: Colors.orangeAccent),
+              ),
+              const SizedBox(height: 28),
+              const Text(
+                'Account Suspended',
+                style: TextStyle(
+                    fontSize: 22,
+                    fontWeight: FontWeight.w800,
+                    color: Colors.white),
+              ),
+              const SizedBox(height: 12),
+              Text(
+                'Your account has been temporarily suspended '
+                'for violating our community guidelines.',
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                    fontSize: 14,
+                    color: Colors.white.withOpacity(0.5),
+                    height: 1.5),
+              ),
+              if (_timeRemaining.isNotEmpty) ...[
+                const SizedBox(height: 20),
+                Container(
+                  padding: const EdgeInsets.symmetric(
+                      horizontal: 16, vertical: 10),
+                  decoration: BoxDecoration(
+                    color: Colors.orangeAccent.withOpacity(0.08),
+                    borderRadius: BorderRadius.circular(10),
+                    border: Border.all(
+                        color: Colors.orangeAccent.withOpacity(0.3)),
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      const Icon(Icons.timer_outlined,
+                          size: 15, color: Colors.orangeAccent),
+                      const SizedBox(width: 8),
+                      Text(
+                        _timeRemaining,
+                        style: const TextStyle(
+                            fontSize: 13,
+                            color: Colors.orangeAccent,
+                            fontWeight: FontWeight.w600),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+              const SizedBox(height: 40),
+              GestureDetector(
+                onTap: () => auth.signOut(),
+                child: Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.symmetric(vertical: 14),
+                  decoration: BoxDecoration(
+                    color: Colors.white.withOpacity(0.06),
+                    borderRadius: BorderRadius.circular(14),
+                    border: Border.all(color: Colors.white12),
+                  ),
+                  child: const Text(
+                    'Sign out',
+                    textAlign: TextAlign.center,
+                    style: TextStyle(
+                        fontSize: 15,
+                        fontWeight: FontWeight.w600,
+                        color: Colors.white54),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// _SplashScreen
 // ─────────────────────────────────────────────────────────────────────────────
 
 class _SplashScreen extends StatelessWidget {
@@ -137,38 +273,31 @@ class _SplashScreen extends StatelessWidget {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Named route constants — use these instead of raw strings everywhere.
+// Named route constants
 // ─────────────────────────────────────────────────────────────────────────────
 
 class AppRoutes {
-  static const String login    = '/login';
-  static const String signup   = '/signup';
-  static const String home     = '/home';
+  static const String login     = '/login';
+  static const String signup    = '/signup';
+  static const String home      = '/home';
   static const String moderator = '/moderator';
 
   static Map<String, WidgetBuilder> get routes => {
     login:     (_) => const LoginPage(),
     signup:    (_) => const SignupPage(),
-    home: (_) => const MainShell(),
+    home:      (_) => const MainShell(),
     moderator: (_) => const ModeratorDashboardPage(),
   };
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// RoleGate widget — wrap any widget that should only be visible to moderators.
-//
-// Usage:
-//   RoleGate(
-//     role: UserRole.moderator,
-//     child: DeleteUserButton(),
-//     fallback: Text('No permission'),  // optional
-//   )
+// RoleGate / ModeratorOnly helpers — unchanged
 // ─────────────────────────────────────────────────────────────────────────────
 
 class RoleGate extends StatelessWidget {
   final UserRole role;
-  final Widget child;
-  final Widget? fallback;
+  final Widget   child;
+  final Widget?  fallback;
 
   const RoleGate({
     super.key,
@@ -180,15 +309,14 @@ class RoleGate extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final auth = context.watch<AuthProvider>();
-    final hasPermission = auth.role == role ||
-        (role == UserRole.user); // users can see user-level content
+    final hasPermission =
+        auth.role == role || (role == UserRole.user);
     return hasPermission ? child : (fallback ?? const SizedBox.shrink());
   }
 }
 
-// Convenience shorthand for moderator-only widgets.
 class ModeratorOnly extends StatelessWidget {
-  final Widget child;
+  final Widget  child;
   final Widget? fallback;
   const ModeratorOnly({super.key, required this.child, this.fallback});
 
