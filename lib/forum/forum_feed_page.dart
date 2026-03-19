@@ -182,9 +182,10 @@ class _ForumFeedPageState extends State<ForumFeedPage> {
   Widget _buildFeed() {
     return StreamBuilder<List<ForumPost>>(
       stream: _service.postsStream(
-        genre:      _filterGenre,
-        difficulty: _filterDifficulty,
-        key:        _filterKey,
+        genre:        _filterGenre,
+        difficulty:   _filterDifficulty,
+        key:          _filterKey,
+        isModerator:  context.read<AuthProvider>().isModerator,  // add this
       ),
       builder: (context, snapshot) {
         if (snapshot.connectionState == ConnectionState.waiting) {

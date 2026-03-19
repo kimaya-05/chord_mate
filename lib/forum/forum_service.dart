@@ -50,23 +50,35 @@ class ForumService {
   }
 
   Future<ForumPost?> songOfTheDay() async {
-    final since = DateTime.now().subtract(const Duration(days: 7));
-    final snap  = await _posts
-        .where('createdAt', isGreaterThan: Timestamp.fromDate(since))
-        .where('ratingCount', isGreaterThan: 0)
-        .orderBy('createdAt', descending: true)
-        .get();
-    if (snap.docs.isEmpty) {
+    try {
+      // Fetch recent posts and pick the best-rated one client-side.
+      // Avoids multiple inequality filters which Firestore doesn't support.
+      final since = DateTime.now().subtract(const Duration(days: 7));
+      final snap = await _posts
+          .where('createdAt', isGreaterThan: Timestamp.fromDate(since))
+          .orderBy('createdAt', descending: true)
+          .limit(20)
+          .get();
+
+      if (snap.docs.isNotEmpty) {
+        final posts = snap.docs.map(ForumPost.fromFirestore).toList();
+        // Pick highest average rating; fall back to most recent if none rated
+        posts.sort((a, b) => b.averageRating.compareTo(a.averageRating));
+        return posts.first;
+      }
+    } catch (_) {}
+
+    // Fallback — just return the most recent post
+    try {
       final fallback = await _posts
-          .orderBy('ratingSum', descending: true)
+          .orderBy('createdAt', descending: true)
           .limit(1)
           .get();
       if (fallback.docs.isEmpty) return null;
       return ForumPost.fromFirestore(fallback.docs.first);
+    } catch (_) {
+      return null;
     }
-    final posts = snap.docs.map(ForumPost.fromFirestore).toList();
-    posts.sort((a, b) => b.averageRating.compareTo(a.averageRating));
-    return posts.first;
   }
 
   Stream<List<ForumPost>> userPostsStream(String uid) {
