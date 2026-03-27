@@ -2,32 +2,27 @@ import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import '../services/audio_service.dart';
-import '../dsp/dsp_engine.dart';
+import '../dsp/pitch_detector.dart';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Standard tuning data
 // ─────────────────────────────────────────────────────────────────────────────
 
 class _GuitarString {
-  final String name;      // e.g. "E"
-  final int    string;    // 1=high e … 6=low E
-  final double targetHz;  // target frequency in standard tuning
-
+  final String name;
+  final int    string;
+  final double targetHz;
   const _GuitarString(this.name, this.string, this.targetHz);
 }
 
 const List<_GuitarString> _standardTuning = [
-  _GuitarString('E', 6, 82.41),   // low E2
-  _GuitarString('A', 5, 110.00),  // A2
-  _GuitarString('D', 4, 146.83),  // D3
-  _GuitarString('G', 3, 196.00),  // G3
-  _GuitarString('B', 2, 246.94),  // B3
-  _GuitarString('e', 1, 329.63),  // high e4
+  _GuitarString('E', 6, 82.41),
+  _GuitarString('A', 5, 110.00),
+  _GuitarString('D', 4, 146.83),
+  _GuitarString('G', 3, 196.00),
+  _GuitarString('B', 2, 246.94),
+  _GuitarString('e', 1, 329.63),
 ];
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Tuning state
-// ─────────────────────────────────────────────────────────────────────────────
 
 enum _TuneState { idle, flat, inTune, sharp }
 
@@ -45,35 +40,33 @@ class GuitarTunerPage extends StatefulWidget {
 class _GuitarTunerPageState extends State<GuitarTunerPage>
     with TickerProviderStateMixin {
 
-  // ── Audio ──────────────────────────────────────────────────────────────────
   final AudioService _audio = AudioService();
   bool _isListening = false;
 
-  // ── Selected string ────────────────────────────────────────────────────────
-  int _selectedStringIndex = 0; // index into _standardTuning (0=low E)
+  int _selectedStringIndex = 0;
 
-  // ── Detection ──────────────────────────────────────────────────────────────
-  double _detectedHz   = 0;
-  double _centsOff     = 0;       // negative=flat, positive=sharp
-  _TuneState _tuneState = _TuneState.idle;
-  String _detectedNote = '—';
+  double     _detectedHz   = 0;
+  double     _centsOff     = 0;
+  _TuneState _tuneState    = _TuneState.idle;
+  String     _detectedNote = '—';
 
-  static const double _inTuneCents    = 5.0;  // ±5 cents = in tune
-  static const double _maxDisplayCents = 50.0; // bar saturates at ±50¢
+  static const double _inTuneCents     = 5.0;
+  static const double _maxDisplayCents = 50.0;
+
+  // ── Smoothing ──────────────────────────────────────────────────────────────
+  // YIN is already accurate; we apply a light EMA just to prevent
+  // single-frame glitches from flickering the UI.
+  double _smoothedHz    = 0;
+  int    _stableFrames  = 0;
+  static const int    _stableThreshold = 3;
+  static const double _smoothingAlpha  = 0.25;
 
   // ── Animations ─────────────────────────────────────────────────────────────
   late final AnimationController _pulseCtrl;
   late final AnimationController _liveCtrl;
   late final AnimationController _barCtrl;
-  late Animation<double> _barAnim; // animates towards _centsOff
-
+  late Animation<double> _barAnim;
   double _lastBarValue = 0;
-
-  // Frequency smoothing — prevents frame-to-frame flicker
-  double _smoothedHz   = 0;
-  int    _stableFrames = 0;
-  static const int    _stableThreshold = 4;   // frames before accepting new freq
-  static const double _smoothingAlpha  = 0.3; // EMA coefficient
 
   @override
   void initState() {
@@ -83,15 +76,13 @@ class _GuitarTunerPageState extends State<GuitarTunerPage>
       vsync: this,
       duration: const Duration(milliseconds: 800),
     );
-
     _liveCtrl = AnimationController(
       vsync: this,
       duration: const Duration(milliseconds: 700),
     )..repeat(reverse: true);
-
     _barCtrl = AnimationController(
       vsync: this,
-      duration: const Duration(milliseconds: 120),
+      duration: const Duration(milliseconds: 100),
     );
     _barAnim = AlwaysStoppedAnimation(0);
   }
@@ -112,15 +103,14 @@ class _GuitarTunerPageState extends State<GuitarTunerPage>
     HapticFeedback.selectionClick();
     setState(() {
       _selectedStringIndex = index;
-      _centsOff   = 0;
-      _detectedHz = 0;
+      _centsOff     = 0;
+      _detectedHz   = 0;
       _detectedNote = '—';
-      _tuneState  = _TuneState.idle;
+      _tuneState    = _TuneState.idle;
       _lastBarValue = 0;
       _smoothedHz   = 0;
       _stableFrames = 0;
     });
-    _audio.resetDSP();
     _animateBar(0);
   }
 
@@ -139,13 +129,15 @@ class _GuitarTunerPageState extends State<GuitarTunerPage>
           _smoothedHz   = 0;
           _stableFrames = 0;
         });
+        _pulseCtrl.stop();
+        _pulseCtrl.reset();
         _animateBar(0);
       }
       return;
     }
 
     _audio.resetDSP();
-    final ok = await _audio.startWithDSP(_onDSP);
+    final ok = await _audio.startWithPitch(_onPitch);
     if (!mounted) return;
     if (ok) {
       setState(() => _isListening = true);
@@ -156,17 +148,15 @@ class _GuitarTunerPageState extends State<GuitarTunerPage>
     }
   }
 
-  // ── DSP callback ───────────────────────────────────────────────────────────
+  // ── Pitch callback — called for every 4096-sample frame ───────────────────
 
-  void _onDSP(DSPResult result) {
+  void _onPitch(PitchResult? result) {
     if (!mounted) return;
 
-    final double rms  = result.rmsLevel;
-    final double freq = result.fundamentalFreq;
-
-    // Noise gate
-    if (rms < 0.012 || freq <= 0) {
+    // Silence / no pitch detected
+    if (result == null || result.rms < 0.008 || result.confidence < 0.5) {
       _stableFrames = 0;
+      _smoothedHz   = 0;
       if (mounted) {
         setState(() {
           _tuneState    = _TuneState.idle;
@@ -178,38 +168,29 @@ class _GuitarTunerPageState extends State<GuitarTunerPage>
       return;
     }
 
-    // ── Frequency smoothing ────────────────────────────────────────────────
-    // Only accept a new frequency if it's within 1 semitone of the smoothed
-    // value, OR if we haven't locked onto anything yet.
-    // This kills the frame-to-frame octave jumps that cause flickering.
-    final bool firstReading = _smoothedHz <= 0;
-    final bool withinOneSemitone = !firstReading &&
-        (freq / _smoothedHz).abs() < 1.0595 &&
-        (_smoothedHz / freq).abs() < 1.0595;
+    final double freq = result.frequency;
 
-    if (firstReading || withinOneSemitone) {
-      // EMA smoothing
-      _smoothedHz = firstReading
-          ? freq
-          : _smoothedHz * (1 - _smoothingAlpha) + freq * _smoothingAlpha;
+    // ── Light EMA smoothing ────────────────────────────────────────────────
+    final bool firstReading    = _smoothedHz <= 0;
+    final double ratio         = firstReading ? 1.0 : freq / _smoothedHz;
+    // Accept if within ±1 semitone (6 % ratio)
+    final bool withinSemitone  = ratio > 0.944 && ratio < 1.059;
+
+    if (firstReading || withinSemitone) {
+      _smoothedHz   = firstReading ? freq : _smoothedHz * (1 - _smoothingAlpha) + freq * _smoothingAlpha;
       _stableFrames++;
     } else {
-      // Outlier — count toward stability before accepting
       _stableFrames = 0;
-      _smoothedHz   = freq; // reset to new candidate
-      return; // skip this frame — wait for stability
+      _smoothedHz   = freq;
+      return;
     }
 
-    // Require a few stable frames before updating UI
     if (_stableFrames < _stableThreshold) return;
 
     final _GuitarString target = _standardTuning[_selectedStringIndex];
-
-    // Cents offset: 1200 * log2(smoothed / target)
     final double cents =
         1200.0 * (math.log(_smoothedHz / target.targetHz) / math.ln2);
-
-    final String noteName = _dsp_frequencyToNoteName(_smoothedHz);
+    final String noteName = _frequencyToNoteName(_smoothedHz);
 
     _TuneState state;
     if (cents.abs() <= _inTuneCents) {
@@ -247,15 +228,12 @@ class _GuitarTunerPageState extends State<GuitarTunerPage>
     _barCtrl.forward(from: 0);
   }
 
-  /// Minimal frequency → note name conversion (no DSPEngine dependency)
-  String _dsp_frequencyToNoteName(double freq) {
-    const List<String> notes = [
-      'C','C#','D','D#','E','F','F#','G','G#','A','A#','B'
-    ];
-    const double a4 = 440.0;
+  String _frequencyToNoteName(double freq) {
+    const notes = ['C','C#','D','D#','E','F','F#','G','G#','A','A#','B'];
+    const double a4     = 440.0;
     const int    a4midi = 69;
-    final double semitones = 12.0 * (math.log(freq / a4) / math.ln2);
-    final int    midi = (a4midi + semitones).round();
+    final double semi   = 12.0 * (math.log(freq / a4) / math.ln2);
+    final int    midi   = (a4midi + semi).round();
     return notes[((midi % 12) + 12) % 12];
   }
 
@@ -264,8 +242,8 @@ class _GuitarTunerPageState extends State<GuitarTunerPage>
   Color get _stateColor {
     switch (_tuneState) {
       case _TuneState.inTune: return Colors.greenAccent;
-      case _TuneState.flat:   return const Color(0xFF64B5F6); // blue = tune up
-      case _TuneState.sharp:  return Colors.orangeAccent;     // orange = tune down
+      case _TuneState.flat:   return const Color(0xFF64B5F6);
+      case _TuneState.sharp:  return Colors.orangeAccent;
       case _TuneState.idle:   return Colors.white24;
     }
   }
@@ -282,11 +260,10 @@ class _GuitarTunerPageState extends State<GuitarTunerPage>
         title: const Text(
           'Tuner',
           style: TextStyle(
-            fontSize: 20,
-            fontWeight: FontWeight.w700,
-            color: Colors.white,
-            letterSpacing: -0.3,
-          ),
+              fontSize: 20,
+              fontWeight: FontWeight.w700,
+              color: Colors.white,
+              letterSpacing: -0.3),
         ),
         actions: [
           if (_isListening)
@@ -299,11 +276,10 @@ class _GuitarTunerPageState extends State<GuitarTunerPage>
       body: SafeArea(
         child: SingleChildScrollView(
           physics: const ClampingScrollPhysics(),
-          child: Column(
-            children: [
+          child: Column(children: [
             const SizedBox(height: 12),
 
-            // ── Guitar head with pegs ─────────────────────────────────
+            // ── Guitar headstock ──────────────────────────────────────
             SizedBox(
               height: 320,
               child: _GuitarHeadWidget(
@@ -314,19 +290,16 @@ class _GuitarTunerPageState extends State<GuitarTunerPage>
               ),
             ),
 
-            // ── Detected note + cents ─────────────────────────────────
+            // ── Note display ──────────────────────────────────────────
             _buildNoteDisplay(),
-
             const SizedBox(height: 16),
 
-            // ── Vertical tuning bar ───────────────────────────────────
+            // ── Tuning bar ────────────────────────────────────────────
             _buildTuningBar(),
-
             const SizedBox(height: 16),
 
-            // ── Hint text ─────────────────────────────────────────────
+            // ── Hint ──────────────────────────────────────────────────
             _buildHintText(),
-
             const SizedBox(height: 20),
 
             // ── Mic button ────────────────────────────────────────────
@@ -337,59 +310,50 @@ class _GuitarTunerPageState extends State<GuitarTunerPage>
                 onTap: _toggleListen,
               ),
             ),
-          ],
-          ),
+          ]),
         ),
       ),
     );
   }
 
-  // ── Note display ───────────────────────────────────────────────────────────
-
   Widget _buildNoteDisplay() {
     final target = _standardTuning[_selectedStringIndex];
-    return Column(
-      children: [
-        // Large detected note
-        AnimatedDefaultTextStyle(
-          duration: const Duration(milliseconds: 200),
+    return Column(children: [
+      AnimatedDefaultTextStyle(
+        duration: const Duration(milliseconds: 200),
+        style: TextStyle(
+          fontSize: 80,
+          fontWeight: FontWeight.w800,
+          color: _stateColor,
+          height: 1,
+          letterSpacing: -2,
+        ),
+        child: Text(
+          _isListening && _detectedNote != '—' ? _detectedNote : target.name,
+        ),
+      ),
+      const SizedBox(height: 6),
+      AnimatedSwitcher(
+        duration: const Duration(milliseconds: 150),
+        child: Text(
+          key: ValueKey(_tuneState),
+          _tuneStateLabel(),
           style: TextStyle(
-            fontSize: 80,
-            fontWeight: FontWeight.w800,
-            color: _stateColor,
-            height: 1,
-            letterSpacing: -2,
-          ),
-          child: Text(
-            _isListening && _detectedNote != '—' ? _detectedNote : target.name,
+            fontSize: 13,
+            color: _stateColor.withOpacity(0.7),
+            fontWeight: FontWeight.w500,
+            letterSpacing: 0.5,
           ),
         ),
-        const SizedBox(height: 6),
-        // Cents readout
-        AnimatedSwitcher(
-          duration: const Duration(milliseconds: 150),
-          child: Text(
-            key: ValueKey(_tuneState),
-            _tuneStateLabel(),
-            style: TextStyle(
-              fontSize: 13,
-              color: _stateColor.withOpacity(0.7),
-              fontWeight: FontWeight.w500,
-              letterSpacing: 0.5,
-            ),
-          ),
+      ),
+      const SizedBox(height: 4),
+      if (_detectedHz > 0)
+        Text(
+          '${_detectedHz.toStringAsFixed(1)} Hz',
+          style: TextStyle(
+              fontSize: 11, color: Colors.white.withOpacity(0.25)),
         ),
-        const SizedBox(height: 4),
-        if (_detectedHz > 0)
-          Text(
-            '${_detectedHz.toStringAsFixed(1)} Hz',
-            style: TextStyle(
-              fontSize: 11,
-              color: Colors.white.withOpacity(0.25),
-            ),
-          ),
-      ],
-    );
+    ]);
   }
 
   String _tuneStateLabel() {
@@ -404,16 +368,13 @@ class _GuitarTunerPageState extends State<GuitarTunerPage>
     }
   }
 
-  // ── Tuning bar ─────────────────────────────────────────────────────────────
-
   Widget _buildTuningBar() {
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 32),
       child: AnimatedBuilder(
         animation: _barCtrl,
         builder: (_, __) {
-          final double fraction =
-              _barAnim.value / _maxDisplayCents; // -1..+1
+          final double fraction = _barAnim.value / _maxDisplayCents;
           return _TuningBarPainter(
             fraction:   fraction,
             stateColor: _stateColor,
@@ -423,8 +384,6 @@ class _GuitarTunerPageState extends State<GuitarTunerPage>
       ),
     );
   }
-
-  // ── Hint ───────────────────────────────────────────────────────────────────
 
   Widget _buildHintText() {
     return Text(
@@ -436,17 +395,16 @@ class _GuitarTunerPageState extends State<GuitarTunerPage>
                   ? 'Pluck the ${_standardTuning[_selectedStringIndex].name} string'
                   : 'Select a string and start listening',
       style: TextStyle(
-        fontSize: 12,
-        color: Colors.white.withOpacity(0.3),
-        letterSpacing: 0.3,
-      ),
+          fontSize: 12,
+          color: Colors.white.withOpacity(0.3),
+          letterSpacing: 0.3),
       textAlign: TextAlign.center,
     );
   }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// _GuitarHeadWidget — draws a stylised guitar headstock with 6 pegs
+// Supporting widgets — identical to the original, kept for completeness
 // ─────────────────────────────────────────────────────────────────────────────
 
 class _GuitarHeadWidget extends StatelessWidget {
@@ -467,63 +425,47 @@ class _GuitarHeadWidget extends StatelessWidget {
     return LayoutBuilder(builder: (_, constraints) {
       final double w = constraints.maxWidth;
       final double h = constraints.maxHeight;
-
-      // Peg positions: 3 on left (low E, A, D), 3 on right (G, B, high e)
-      // Indexed 0–5 matching _standardTuning order
-      final List<Offset> pegOffsets = _pegPositions(w, h);
-
-      return Stack(
-        children: [
-          // Guitar head body
-          Center(
-            child: CustomPaint(
-              size: Size(w * 0.55, h * 0.88),
-              painter: _HeadstockPainter(),
+      final pegs = _pegPositions(w, h);
+      return Stack(children: [
+        Center(
+          child: CustomPaint(
+            size: Size(w * 0.55, h * 0.88),
+            painter: _HeadstockPainter(),
+          ),
+        ),
+        for (int i = 0; i < _standardTuning.length; i++)
+          Positioned(
+            left: pegs[i].dx - 28,
+            top:  pegs[i].dy - 28,
+            child: _PegButton(
+              label:      _standardTuning[i].name,
+              isSelected: i == selectedIndex,
+              isInTune:   i == selectedIndex && tuneState == _TuneState.inTune,
+              pulseCtrl:  pulseCtrl,
+              onTap:      () => onSelectString(i),
             ),
           ),
-
-          // Pegs
-          for (int i = 0; i < _standardTuning.length; i++)
-            Positioned(
-              left:  pegOffsets[i].dx - 28,
-              top:   pegOffsets[i].dy - 28,
-              child: _PegButton(
-                label:        _standardTuning[i].name,
-                isSelected:   i == selectedIndex,
-                isInTune:     i == selectedIndex && tuneState == _TuneState.inTune,
-                pulseCtrl:    pulseCtrl,
-                onTap:        () => onSelectString(i),
-              ),
-            ),
-        ],
-      );
+      ]);
     });
   }
 
   List<Offset> _pegPositions(double w, double h) {
-    final double cx = w / 2;
-    // Left pegs (strings 6=E, 5=A, 4=D) — indices 0,1,2
-    // Right pegs (strings 3=G, 2=B, 1=e) — indices 3,4,5
+    final double cx     = w / 2;
     final double leftX  = cx - w * 0.30;
     final double rightX = cx + w * 0.30;
     final double top    = h * 0.10;
     final double mid    = h * 0.38;
     final double bot    = h * 0.66;
-
     return [
-      Offset(leftX,  top),   // 0: low E
-      Offset(leftX,  mid),   // 1: A
-      Offset(leftX,  bot),   // 2: D
-      Offset(rightX, top),   // 3: G
-      Offset(rightX, mid),   // 4: B
-      Offset(rightX, bot),   // 5: high e
+      Offset(leftX,  top),
+      Offset(leftX,  mid),
+      Offset(leftX,  bot),
+      Offset(rightX, top),
+      Offset(rightX, mid),
+      Offset(rightX, bot),
     ];
   }
 }
-
-// ─────────────────────────────────────────────────────────────────────────────
-// _HeadstockPainter — draws a simple Strat-style headstock outline
-// ─────────────────────────────────────────────────────────────────────────────
 
 class _HeadstockPainter extends CustomPainter {
   @override
@@ -534,17 +476,14 @@ class _HeadstockPainter extends CustomPainter {
     final bodyPaint = Paint()
       ..color = const Color(0xFF1A1A24)
       ..style = PaintingStyle.fill;
-
     final borderPaint = Paint()
       ..color = Colors.white.withOpacity(0.12)
       ..style = PaintingStyle.stroke
       ..strokeWidth = 1.5;
 
-    // Simplified headstock silhouette
     final path = Path();
     path.moveTo(w * 0.35, 0);
     path.lineTo(w * 0.65, 0);
-    // Right side curves
     path.quadraticBezierTo(w * 0.85, 0,      w * 0.9,  h * 0.08);
     path.lineTo(w * 0.9,  h * 0.72);
     path.quadraticBezierTo(w * 0.9,  h * 0.85, w * 0.75, h * 0.92);
@@ -561,38 +500,24 @@ class _HeadstockPainter extends CustomPainter {
     canvas.drawPath(path, bodyPaint);
     canvas.drawPath(path, borderPaint);
 
-    // Nut line
     final nutPaint = Paint()
       ..color = Colors.white.withOpacity(0.25)
       ..strokeWidth = 3
       ..strokeCap = StrokeCap.round;
-    canvas.drawLine(
-      Offset(w * 0.15, h * 0.06),
-      Offset(w * 0.85, h * 0.06),
-      nutPaint,
-    );
+    canvas.drawLine(Offset(w * 0.15, h * 0.06), Offset(w * 0.85, h * 0.06), nutPaint);
 
-    // String lines (6 vertical lines)
     final stringPaint = Paint()
       ..color = Colors.white.withOpacity(0.08)
       ..strokeWidth = 1;
     for (int i = 0; i < 6; i++) {
       final double x = w * 0.18 + i * (w * 0.64 / 5);
-      canvas.drawLine(
-        Offset(x, h * 0.06),
-        Offset(x, h * 0.88),
-        stringPaint,
-      );
+      canvas.drawLine(Offset(x, h * 0.06), Offset(x, h * 0.88), stringPaint);
     }
   }
 
   @override
   bool shouldRepaint(covariant CustomPainter _) => false;
 }
-
-// ─────────────────────────────────────────────────────────────────────────────
-// _PegButton — individual tuning peg with label
-// ─────────────────────────────────────────────────────────────────────────────
 
 class _PegButton extends StatelessWidget {
   final String  label;
@@ -615,14 +540,10 @@ class _PegButton extends StatelessWidget {
       onTap: onTap,
       child: AnimatedBuilder(
         animation: pulseCtrl,
-        builder: (_, child) {
-          double glowRadius = 0;
-          if (isInTune) {
-            glowRadius = 8 + 6 * pulseCtrl.value;
-          }
+        builder: (_, __) {
+          final double glow = isInTune ? 8 + 6 * pulseCtrl.value : 0;
           return Container(
-            width:  56,
-            height: 56,
+            width: 56, height: 56,
             decoration: BoxDecoration(
               shape: BoxShape.circle,
               color: isInTune
@@ -639,20 +560,16 @@ class _PegButton extends StatelessWidget {
                 width: isSelected ? 2 : 1,
               ),
               boxShadow: isInTune
-                  ? [
-                      BoxShadow(
-                        color: Colors.greenAccent.withOpacity(0.4),
-                        blurRadius: glowRadius,
-                        spreadRadius: glowRadius * 0.3,
-                      )
-                    ]
+                  ? [BoxShadow(
+                      color: Colors.greenAccent.withOpacity(0.4),
+                      blurRadius: glow,
+                      spreadRadius: glow * 0.3,
+                    )]
                   : isSelected
-                      ? [
-                          BoxShadow(
-                            color: Colors.white.withOpacity(0.08),
-                            blurRadius: 8,
-                          )
-                        ]
+                      ? [BoxShadow(
+                          color: Colors.white.withOpacity(0.08),
+                          blurRadius: 8,
+                        )]
                       : null,
             ),
             child: Center(
@@ -676,11 +593,6 @@ class _PegButton extends StatelessWidget {
     );
   }
 }
-
-// ─────────────────────────────────────────────────────────────────────────────
-// _TuningBarPainter — the horizontal tuning indicator bar
-// fraction: -1 (50¢ flat) … 0 (in tune) … +1 (50¢ sharp)
-// ─────────────────────────────────────────────────────────────────────────────
 
 class _TuningBarPainter extends StatelessWidget {
   final double fraction;
@@ -727,97 +639,72 @@ class _BarPainter extends CustomPainter {
     final double cx = w / 2;
     final double cy = h / 2;
 
-    // ── Background track ────────────────────────────────────────────────────
-    final trackPaint = Paint()
-      ..color = Colors.white.withOpacity(0.06)
-      ..style = PaintingStyle.fill;
-    final trackRect = RRect.fromRectAndRadius(
-      Rect.fromCenter(center: Offset(cx, cy), width: w, height: 8),
-      const Radius.circular(4),
+    // Track
+    canvas.drawRRect(
+      RRect.fromRectAndRadius(
+        Rect.fromCenter(center: Offset(cx, cy), width: w, height: 8),
+        const Radius.circular(4),
+      ),
+      Paint()..color = Colors.white.withOpacity(0.06),
     );
-    canvas.drawRRect(trackRect, trackPaint);
 
-    // ── Tick marks ──────────────────────────────────────────────────────────
+    // Tick marks
     final tickPaint = Paint()
       ..color = Colors.white.withOpacity(0.12)
       ..strokeWidth = 1;
     for (int i = -4; i <= 4; i++) {
-      final double x = cx + i * (w / 8);
+      final double x    = cx + i * (w / 8);
       final double tickH = i == 0 ? 20.0 : 10.0;
-      canvas.drawLine(
-        Offset(x, cy - tickH / 2),
-        Offset(x, cy + tickH / 2),
-        tickPaint,
-      );
+      canvas.drawLine(Offset(x, cy - tickH / 2), Offset(x, cy + tickH / 2), tickPaint);
     }
 
-    // ── Centre marker ───────────────────────────────────────────────────────
-    final centrePaint = Paint()
-      ..color = Colors.white.withOpacity(0.4)
-      ..strokeWidth = 2;
+    // Centre line
     canvas.drawLine(
-      Offset(cx, cy - 16),
-      Offset(cx, cy + 16),
-      centrePaint,
+      Offset(cx, cy - 16), Offset(cx, cy + 16),
+      Paint()..color = Colors.white.withOpacity(0.4)..strokeWidth = 2,
     );
 
     if (!isActive) return;
 
-    // ── Active indicator bar ─────────────────────────────────────────────────
-    final double barX  = cx + fraction * (w / 2) * 0.9;
-    const double barHalfW = 3.0;
+    final double barX = cx + fraction * (w / 2) * 0.9;
 
     // Glow
-    final glowPaint = Paint()
-      ..color = stateColor.withOpacity(0.25)
-      ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 10);
     canvas.drawRRect(
       RRect.fromRectAndRadius(
-        Rect.fromCenter(
-            center: Offset(barX, cy), width: barHalfW * 6, height: 36),
+        Rect.fromCenter(center: Offset(barX, cy), width: 18, height: 36),
         const Radius.circular(4),
       ),
-      glowPaint,
+      Paint()
+        ..color = stateColor.withOpacity(0.25)
+        ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 10),
     );
 
     // Bar
-    final barPaint = Paint()
-      ..color = stateColor
-      ..style = PaintingStyle.fill;
     canvas.drawRRect(
       RRect.fromRectAndRadius(
-        Rect.fromCenter(
-            center: Offset(barX, cy), width: barHalfW * 2, height: 32),
+        Rect.fromCenter(center: Offset(barX, cy), width: 6, height: 32),
         const Radius.circular(3),
       ),
-      barPaint,
+      Paint()..color = stateColor,
     );
 
-    // Labels
-    final flatTp = TextPainter(
-      text: TextSpan(
-        text: '♭',
-        style: TextStyle(
-            fontSize: 16,
-            color: Colors.white.withOpacity(0.25),
-            fontWeight: FontWeight.bold),
-      ),
-      textDirection: TextDirection.ltr,
-    )..layout();
-    flatTp.paint(canvas, Offset(8, cy - flatTp.height / 2));
+    // ♭ / ♯ labels
+    void drawLabel(String text, double x) {
+      final tp = TextPainter(
+        text: TextSpan(
+          text: text,
+          style: TextStyle(
+              fontSize: 16,
+              color: Colors.white.withOpacity(0.25),
+              fontWeight: FontWeight.bold),
+        ),
+        textDirection: TextDirection.ltr,
+      )..layout();
+      tp.paint(canvas, Offset(x, cy - tp.height / 2));
+    }
 
-    final sharpTp = TextPainter(
-      text: TextSpan(
-        text: '♯',
-        style: TextStyle(
-            fontSize: 16,
-            color: Colors.white.withOpacity(0.25),
-            fontWeight: FontWeight.bold),
-      ),
-      textDirection: TextDirection.ltr,
-    )..layout();
-    sharpTp.paint(
-        canvas, Offset(w - sharpTp.width - 8, cy - sharpTp.height / 2));
+    drawLabel('♭', 8);
+    drawLabel('♯', w - 22);
   }
 
   @override
@@ -827,14 +714,9 @@ class _BarPainter extends CustomPainter {
       old.isActive != isActive;
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// _MicButton
-// ─────────────────────────────────────────────────────────────────────────────
-
 class _MicButton extends StatelessWidget {
   final bool isListening;
   final VoidCallback onTap;
-
   const _MicButton({required this.isListening, required this.onTap});
 
   @override
@@ -870,8 +752,7 @@ class _MicButton extends StatelessWidget {
               style: TextStyle(
                 fontSize: 15,
                 fontWeight: FontWeight.w600,
-                color:
-                    isListening ? Colors.redAccent : Colors.greenAccent,
+                color: isListening ? Colors.redAccent : Colors.greenAccent,
               ),
             ),
           ],
@@ -880,10 +761,6 @@ class _MicButton extends StatelessWidget {
     );
   }
 }
-
-// ─────────────────────────────────────────────────────────────────────────────
-// _LiveBadge
-// ─────────────────────────────────────────────────────────────────────────────
 
 class _LiveBadge extends StatelessWidget {
   final AnimationController controller;

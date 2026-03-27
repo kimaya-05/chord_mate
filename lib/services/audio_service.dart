@@ -6,6 +6,7 @@ import 'package:flutter_sound/flutter_sound.dart';
 import 'package:permission_handler/permission_handler.dart';
 import '../dsp/dsp_engine.dart';
 import '../ml/ml_classifier.dart';
+ import '../dsp/pitch_detector.dart';
 
 /// Callback function for processing audio samples
 typedef AudioCallback = void Function(List<double> samples);
@@ -42,11 +43,20 @@ class DSPResult {
 
 /// Callback for detailed DSP results
 typedef DSPCallback = void Function(DSPResult result);
+typedef PitchCallback = void Function(PitchResult? result);
 
 /// Audio service for capturing microphone input and processing audio
 class AudioService {
   final DSPEngine _dsp = DSPEngine(enableDebugLogs: true);
+  final PitchDetector _pitchDetector = PitchDetector(
+        sampleRate: sampleRate,
+        frameSize:  4096,
+        threshold:  0.12,
+        minFreqHz:  70.0,
+        maxFreqHz:  400.0,
+      );
   late final StreamingAudioState _audioState;
+  late final StreamingAudioState _pitchState;
   final MLChordClassifier _mlClassifier = MLChordClassifier();
   
   final FlutterSoundRecorder _recorder = FlutterSoundRecorder();
@@ -75,7 +85,11 @@ class AudioService {
   AudioService() {
     // ensure streaming buffer matches DSP engine frame/hop sizes
     _audioState = StreamingAudioState(frameSize: _dsp.frameSize, hopSize: _dsp.hopSize);
-  }
+     _pitchState = StreamingAudioState(
+        frameSize: 4096,
+        hopSize:   2048,
+      );
+    }
 
   /// Initialize audio service and request permissions
   Future<bool> init() async {
@@ -383,6 +397,7 @@ class AudioService {
     _melSpectrogramBuffer.clear();
     _lastMLPrediction = 'Unknown';
     _lastMLConfidence = 0.0;
+    _pitchState.reset();
   }
 
   // ============ Private Methods ============
@@ -415,6 +430,19 @@ class AudioService {
       });
     }
   }
+
+  Future<bool> startWithPitch(PitchCallback onPitch) async {
+  return await start((samples) {
+    // Accumulate samples into 4096-sample frames with 50 % overlap.
+    // We reuse StreamingAudioState with a dedicated local buffer so
+    // this path never touches the chord-detection AudioState.
+    final readyFrames = _pitchState.addSamples(samples);
+    for (final frameData in readyFrames) {
+      final result = _pitchDetector.detect(frameData);
+      onPitch(result); // null = silence/no pitch
+    }
+  });
+}
 
   void _log(String message) {
     stderr.writeln('[AudioService] $message');
