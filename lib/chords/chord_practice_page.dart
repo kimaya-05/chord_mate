@@ -28,7 +28,9 @@ class _ChordPracticePageState extends State<ChordPracticePage>
   double _rms            = 0.0;
   bool   _isCorrect      = false;
   int    _correctFrames  = 0;
+  int _incorrectFrames = 0;                    
   static const int _correctHoldFrames = 6;
+  static const int _incorrectGraceFrames = 12;
 
   _Filter _filter = _Filter.all;
 
@@ -64,6 +66,7 @@ class _ChordPracticePageState extends State<ChordPracticePage>
           _rms           = 0;
           _isCorrect     = false;
           _correctFrames = 0;
+          _incorrectFrames = 0;
         });
       }
       return;
@@ -105,8 +108,14 @@ class _ChordPracticePageState extends State<ChordPracticePage>
 
     if (correct) {
       _correctFrames++;
+      _incorrectFrames = 0;          // reset grace counter on any correct frame
     } else {
-      _correctFrames = 0;
+      _incorrectFrames++;
+      // Only reset correct streak once grace period is exhausted
+      if (_incorrectFrames >= _incorrectGraceFrames) {
+        _correctFrames   = 0;
+        _incorrectFrames = 0;
+      }
     }
 
     final bool solidHit = _correctFrames >= _correctHoldFrames;
@@ -148,6 +157,7 @@ class _ChordPracticePageState extends State<ChordPracticePage>
       _selected      = c;
       _isCorrect     = false;
       _correctFrames = 0;
+      _incorrectFrames = 0;
       _detectedChord = '—';
     });
     _audio.resetDSP();
