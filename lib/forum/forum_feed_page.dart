@@ -6,10 +6,6 @@ import 'forum_service.dart';
 import 'post_viewer_page.dart';
 import 'create_post_page.dart';
 
-// ─────────────────────────────────────────────────────────────────────────────
-// ForumFeedPage
-// ─────────────────────────────────────────────────────────────────────────────
-
 class ForumFeedPage extends StatefulWidget {
   const ForumFeedPage({super.key});
 
@@ -24,7 +20,6 @@ class _ForumFeedPageState extends State<ForumFeedPage> {
   String? _filterDifficulty;
   String? _filterKey;
 
-  // Search
   final TextEditingController _searchCtrl = TextEditingController();
   String _searchQuery = '';
   bool   _isSearching = false;
@@ -55,6 +50,20 @@ class _ForumFeedPageState extends State<ForumFeedPage> {
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: const Color(0xFF0A0A0F),
+      // ── FAB replaces the app bar add button ──────────────────────────────
+      floatingActionButton: _isSearching
+          ? null
+          : FloatingActionButton(
+              onPressed: () => Navigator.push(
+                context,
+                MaterialPageRoute(builder: (_) => const CreatePostPage()),
+              ),
+              backgroundColor: Colors.greenAccent,
+              foregroundColor: const Color(0xFF0A0A0F),
+              elevation: 4,
+              tooltip: 'New chord sheet',
+              child: const Icon(Icons.add, size: 28),
+            ),
       appBar: AppBar(
         backgroundColor: const Color(0xFF0A0A0F),
         elevation: 0,
@@ -62,11 +71,13 @@ class _ForumFeedPageState extends State<ForumFeedPage> {
             ? TextField(
                 controller: _searchCtrl,
                 autofocus: true,
-                style: const TextStyle(color: Colors.white, fontSize: 16),
+                style:
+                    const TextStyle(color: Colors.white, fontSize: 16),
                 decoration: InputDecoration(
                   hintText: 'Search songs or artists…',
                   hintStyle: TextStyle(
-                      color: Colors.white.withOpacity(0.35), fontSize: 15),
+                      color: Colors.white.withOpacity(0.35),
+                      fontSize: 15),
                   border: InputBorder.none,
                 ),
                 onChanged: (v) => setState(() => _searchQuery = v),
@@ -95,15 +106,6 @@ class _ForumFeedPageState extends State<ForumFeedPage> {
               });
             },
           ),
-          if (!_isSearching)
-            IconButton(
-              icon: const Icon(Icons.add, color: Colors.greenAccent),
-              tooltip: 'New post',
-              onPressed: () => Navigator.push(
-                context,
-                MaterialPageRoute(builder: (_) => const CreatePostPage()),
-              ),
-            ),
         ],
       ),
       body: Column(
@@ -112,27 +114,21 @@ class _ForumFeedPageState extends State<ForumFeedPage> {
           if (_hasFilter)
             Padding(
               padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
-              child: Row(
-                children: [
-                  Text(
-                    'Filtering results',
+              child: Row(children: [
+                Text('Filtering results',
                     style: TextStyle(
                         fontSize: 12,
-                        color: Colors.white.withOpacity(0.4)),
-                  ),
-                  const SizedBox(width: 8),
-                  GestureDetector(
-                    onTap: _clearFilters,
-                    child: const Text(
-                      'Clear all',
+                        color: Colors.white.withOpacity(0.4))),
+                const SizedBox(width: 8),
+                GestureDetector(
+                  onTap: _clearFilters,
+                  child: const Text('Clear all',
                       style: TextStyle(
                           fontSize: 12,
                           color: Colors.greenAccent,
-                          fontWeight: FontWeight.w600),
-                    ),
-                  ),
-                ],
-              ),
+                          fontWeight: FontWeight.w600)),
+                ),
+              ]),
             ),
           Expanded(child: _buildFeed()),
         ],
@@ -140,14 +136,13 @@ class _ForumFeedPageState extends State<ForumFeedPage> {
     );
   }
 
-  // ── Filter row ──────────────────────────────────────────────────────────────
-
   Widget _buildFilters() {
     return SizedBox(
       height: 48,
       child: ListView(
         scrollDirection: Axis.horizontal,
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+        padding:
+            const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
         children: [
           _FilterChip(
             label: _filterGenre ?? 'Genre',
@@ -177,15 +172,13 @@ class _ForumFeedPageState extends State<ForumFeedPage> {
     );
   }
 
-  // ── Feed ────────────────────────────────────────────────────────────────────
-
   Widget _buildFeed() {
     return StreamBuilder<List<ForumPost>>(
       stream: _service.postsStream(
-        genre:        _filterGenre,
-        difficulty:   _filterDifficulty,
-        key:          _filterKey,
-        isModerator:  context.read<AuthProvider>().isModerator,  // add this
+        genre:       _filterGenre,
+        difficulty:  _filterDifficulty,
+        key:         _filterKey,
+        isModerator: context.read<AuthProvider>().isModerator,
       ),
       builder: (context, snapshot) {
         if (snapshot.connectionState == ConnectionState.waiting) {
@@ -196,18 +189,18 @@ class _ForumFeedPageState extends State<ForumFeedPage> {
         if (snapshot.hasError) {
           return Center(
             child: Text('Error loading posts',
-                style:
-                    TextStyle(color: Colors.white.withOpacity(0.4))),
+                style: TextStyle(
+                    color: Colors.white.withOpacity(0.4))),
           );
         }
         List<ForumPost> posts = snapshot.data ?? [];
-        // Client-side search filter
         if (_searchQuery.trim().isNotEmpty) {
           final q = _searchQuery.trim().toLowerCase();
-          posts = posts.where((p) =>
-            p.title.toLowerCase().contains(q) ||
-            p.artist.toLowerCase().contains(q),
-          ).toList();
+          posts = posts
+              .where((p) =>
+                  p.title.toLowerCase().contains(q) ||
+                  p.artist.toLowerCase().contains(q))
+              .toList();
         }
         if (posts.isEmpty) {
           return Center(
@@ -215,7 +208,8 @@ class _ForumFeedPageState extends State<ForumFeedPage> {
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
                 Icon(Icons.library_music_outlined,
-                    size: 48, color: Colors.white.withOpacity(0.15)),
+                    size: 48,
+                    color: Colors.white.withOpacity(0.15)),
                 const SizedBox(height: 16),
                 Text(
                   _hasFilter
@@ -229,14 +223,13 @@ class _ForumFeedPageState extends State<ForumFeedPage> {
             ),
           );
         }
+        // Extra bottom padding so the FAB doesn't cover the last card
         return ListView.separated(
-          padding: const EdgeInsets.fromLTRB(16, 4, 16, 24),
+          padding: const EdgeInsets.fromLTRB(16, 4, 16, 88),
           itemCount: posts.length,
           separatorBuilder: (_, __) => const SizedBox(height: 10),
-          itemBuilder: (_, i) => _PostCard(
-            post:    posts[i],
-            service: _service,
-          ),
+          itemBuilder: (_, i) =>
+              _PostCard(post: posts[i], service: _service),
         );
       },
     );
@@ -244,24 +237,19 @@ class _ForumFeedPageState extends State<ForumFeedPage> {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// _PostCard
+// _PostCard  (unchanged)
 // ─────────────────────────────────────────────────────────────────────────────
 
 class _PostCard extends StatelessWidget {
   final ForumPost    post;
   final ForumService service;
-
   const _PostCard({required this.post, required this.service});
 
   @override
   Widget build(BuildContext context) {
     return GestureDetector(
-      onTap: () => Navigator.push(
-        context,
-        MaterialPageRoute(
-          builder: (_) => PostViewerPage(post: post),
-        ),
-      ),
+      onTap: () => Navigator.push(context,
+          MaterialPageRoute(builder: (_) => PostViewerPage(post: post))),
       child: Container(
         padding: const EdgeInsets.all(16),
         decoration: BoxDecoration(
@@ -272,50 +260,38 @@ class _PostCard extends StatelessWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // Title + artist
-            Row(
-              children: [
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        post.title,
+            Row(children: [
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(post.title,
                         style: const TextStyle(
                             fontSize: 16,
                             fontWeight: FontWeight.w700,
                             color: Colors.white),
                         maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                      const SizedBox(height: 2),
-                      Text(
-                        post.artist,
+                        overflow: TextOverflow.ellipsis),
+                    const SizedBox(height: 2),
+                    Text(post.artist,
                         style: TextStyle(
                             fontSize: 13,
-                            color: Colors.white.withOpacity(0.45)),
-                      ),
-                    ],
-                  ),
+                            color: Colors.white.withOpacity(0.45))),
+                  ],
                 ),
-                // Rating
-                if (post.ratingCount > 0) ...[
-                  const Icon(Icons.star_rounded,
-                      color: Colors.amber, size: 16),
-                  const SizedBox(width: 3),
-                  Text(
-                    post.averageRating.toStringAsFixed(1),
+              ),
+              if (post.ratingCount > 0) ...[
+                const Icon(Icons.star_rounded,
+                    color: Colors.amber, size: 16),
+                const SizedBox(width: 3),
+                Text(post.averageRating.toStringAsFixed(1),
                     style: const TextStyle(
                         fontSize: 13,
                         color: Colors.amber,
-                        fontWeight: FontWeight.w600),
-                  ),
-                ],
+                        fontWeight: FontWeight.w600)),
               ],
-            ),
+            ]),
             const SizedBox(height: 10),
-
-            // Tags row
             Wrap(
               spacing: 6,
               runSpacing: 6,
@@ -328,33 +304,23 @@ class _PostCard extends StatelessWidget {
               ],
             ),
             const SizedBox(height: 10),
-
-            // Footer
-            Row(
-              children: [
-                Icon(Icons.person_outline,
-                    size: 13,
-                    color: Colors.white.withOpacity(0.3)),
-                const SizedBox(width: 4),
-                Text(
-                  post.authorName,
+            Row(children: [
+              Icon(Icons.person_outline,
+                  size: 13, color: Colors.white.withOpacity(0.3)),
+              const SizedBox(width: 4),
+              Text(post.authorName,
                   style: TextStyle(
                       fontSize: 12,
-                      color: Colors.white.withOpacity(0.3)),
-                ),
-                const Spacer(),
-                Icon(Icons.access_time,
-                    size: 13,
-                    color: Colors.white.withOpacity(0.3)),
-                const SizedBox(width: 4),
-                Text(
-                  _timeAgo(post.createdAt),
+                      color: Colors.white.withOpacity(0.3))),
+              const Spacer(),
+              Icon(Icons.access_time,
+                  size: 13, color: Colors.white.withOpacity(0.3)),
+              const SizedBox(width: 4),
+              Text(_timeAgo(post.createdAt),
                   style: TextStyle(
                       fontSize: 12,
-                      color: Colors.white.withOpacity(0.3)),
-                ),
-              ],
-            ),
+                      color: Colors.white.withOpacity(0.3))),
+            ]),
           ],
         ),
       ),
@@ -394,27 +360,21 @@ class _Tag extends StatelessWidget {
         borderRadius: BorderRadius.circular(20),
         border: Border.all(color: color.withOpacity(0.25)),
       ),
-      child: Text(
-        text,
-        style: TextStyle(
-            fontSize: 11,
-            fontWeight: FontWeight.w600,
-            color: color.withOpacity(0.9)),
-      ),
+      child: Text(text,
+          style: TextStyle(
+              fontSize: 11,
+              fontWeight: FontWeight.w600,
+              color: color.withOpacity(0.9))),
     );
   }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// _FilterChip
-// ─────────────────────────────────────────────────────────────────────────────
-
 class _FilterChip extends StatelessWidget {
-  final String         label;
-  final bool           active;
-  final List<String>   options;
+  final String             label;
+  final bool               active;
+  final List<String>       options;
   final ValueChanged<String> onSelected;
-  final VoidCallback   onCleared;
+  final VoidCallback       onCleared;
 
   const _FilterChip({
     required this.label,
@@ -427,9 +387,7 @@ class _FilterChip extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return GestureDetector(
-      onTap: active
-          ? onCleared
-          : () => _showPicker(context),
+      onTap: active ? onCleared : () => _showPicker(context),
       child: Container(
         padding:
             const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
@@ -447,18 +405,17 @@ class _FilterChip extends StatelessWidget {
         child: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Text(
-              label,
-              style: TextStyle(
-                fontSize: 12,
-                fontWeight: FontWeight.w600,
-                color: active ? Colors.greenAccent : Colors.white54,
-              ),
-            ),
+            Text(label,
+                style: TextStyle(
+                    fontSize: 12,
+                    fontWeight: FontWeight.w600,
+                    color: active
+                        ? Colors.greenAccent
+                        : Colors.white54)),
             const SizedBox(width: 4),
             Icon(
               active ? Icons.close : Icons.keyboard_arrow_down,
-              size:  14,
+              size: 14,
               color: active ? Colors.greenAccent : Colors.white38,
             ),
           ],
@@ -472,8 +429,8 @@ class _FilterChip extends StatelessWidget {
       context: context,
       backgroundColor: const Color(0xFF13131A),
       shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-      ),
+          borderRadius:
+              BorderRadius.vertical(top: Radius.circular(20))),
       builder: (_) => ListView(
         shrinkWrap: true,
         padding: const EdgeInsets.symmetric(vertical: 12),

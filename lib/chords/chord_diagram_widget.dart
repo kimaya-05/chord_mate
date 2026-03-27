@@ -7,17 +7,22 @@ class ChordDiagramWidget extends StatelessWidget {
   final ChordData chord;
   final ChordDiagramSize size;
   final bool showName;
+  final bool showBeginner;
 
   const ChordDiagramWidget({
     super.key,
     required this.chord,
     this.size = ChordDiagramSize.medium,
     this.showName = true,
+    this.showBeginner = false,
   });
 
   @override
   Widget build(BuildContext context) {
     final cfg = _DiagramConfig.forSize(size);
+    final fingerings = showBeginner && chord.beginnerFingerings != null
+      ? chord.beginnerFingerings!
+      : chord.fingerings;
     return Column(
       mainAxisSize: MainAxisSize.min,
       children: [
@@ -35,7 +40,11 @@ class ChordDiagramWidget extends StatelessWidget {
         ],
         CustomPaint(
           size: Size(cfg.totalWidth, cfg.totalHeight),
-          painter: _DiagramPainter(chord: chord, cfg: cfg),
+          painter: _DiagramPainter(
+        chord: chord,
+        cfg: cfg,
+        fingerings: fingerings,  
+      ),
         ),
       ],
     );
@@ -55,6 +64,7 @@ class _DiagramConfig {
   final double nameGap;
   final double labelFontSize;
   final double baseFretFontSize;
+  final List<StringFingering> fingerings;
 
   static const int numStrings = 6;
   static const int numFrets = 4;
@@ -75,6 +85,7 @@ class _DiagramConfig {
     required this.nameGap,
     required this.labelFontSize,
     required this.baseFretFontSize,
+      this.fingerings = const [],
   });
 
   factory _DiagramConfig.forSize(ChordDiagramSize s) {
@@ -112,8 +123,9 @@ class _DiagramConfig {
 class _DiagramPainter extends CustomPainter {
   final ChordData chord;
   final _DiagramConfig cfg;
+  final List<StringFingering> fingerings;
 
-  _DiagramPainter({required this.chord, required this.cfg});
+  _DiagramPainter({required this.chord, required this.cfg, required this.fingerings});
 
   static const Color _nutColor      = Color(0xFFD4C9A8);
   static const Color _fretColor     = Color(0xFF4A4A5A);
@@ -181,7 +193,7 @@ class _DiagramPainter extends CustomPainter {
 
   void _drawOpenMuteMarkers(Canvas canvas) {
     // Was: chord.frets[i] — now we iterate chord.fingerings (List<StringFingering>)
-    for (final fp in chord.fingerings) {
+    for (final fp in fingerings) {
       // col = 6 - fp.string so that string 6 (low E) → col 0 (leftmost)
       final col = _DiagramConfig.numStrings - fp.string;
       final x   = cfg.stringX(col);
@@ -219,7 +231,7 @@ class _DiagramPainter extends CustomPainter {
 
     // Detect barre: two or more fingerings share the same fret with finger == 1
     final barreGroups = <int, List<StringFingering>>{};
-    for (final fp in chord.fingerings) {
+    for (final fp in fingerings) {
       if (fp.finger == 1 && fp.fret > 0) {
         barreGroups.putIfAbsent(fp.fret, () => []).add(fp);
       }
@@ -250,7 +262,7 @@ class _DiagramPainter extends CustomPainter {
 
     // Draw individual dots
     // Was: for (final fp in chord.fingers) — now chord.fingerings
-    for (final fp in chord.fingerings) {
+    for (final fp in fingerings) {
       if (fp.fret <= 0) continue; // open/muted handled above
 
       final relativeFret = fp.fret - chord.startFret + 1; // ← was chord.baseFret
@@ -307,5 +319,5 @@ class _DiagramPainter extends CustomPainter {
 
   @override
   bool shouldRepaint(covariant _DiagramPainter old) =>
-      old.chord != chord || old.cfg != cfg;
+      old.chord != chord || old.cfg != cfg || old.fingerings != fingerings;
 }

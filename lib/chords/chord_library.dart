@@ -25,6 +25,7 @@ class ChordData {
   final List<StringFingering> fingerings; // one entry per string
   final List<String> tips;
   final String mlLabel;       // must match simplifyChordName output exactly
+  final List<StringFingering>? beginnerFingerings;
 
   const ChordData({
     required this.name,
@@ -35,6 +36,7 @@ class ChordData {
     required this.fingerings,
     required this.tips,
     required this.mlLabel,
+    this.beginnerFingerings,
   });
 }
 
