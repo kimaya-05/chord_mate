@@ -130,6 +130,14 @@ const List<ChordData> allChords = [
       StringFingering(2, 1, 1), // barre
       StringFingering(1, 1, 1), // barre
     ],
+    beginnerFingerings: [
+    StringFingering(6, -1, -1),
+    StringFingering(5, -1, -1),
+    StringFingering(4,  3,  4),
+    StringFingering(3,  2,  3),
+    StringFingering(2,  1,  1),
+    StringFingering(1,  1,  1),
+  ],
     tips: [
       'Full barre at fret 1 with your index finger across all 6 strings.',
       'Roll your index finger slightly back (toward the headstock) for a cleaner barre.',
@@ -196,6 +204,14 @@ const List<ChordData> allChords = [
       StringFingering(2, 4, 4),
       StringFingering(1, 2, 1),
     ],
+    beginnerFingerings: [
+    StringFingering(6, -1, -1),
+    StringFingering(5,  2,  1),
+    StringFingering(4,  4,  3),
+    StringFingering(3,  4,  4),
+    StringFingering(2,  4,  4),
+    StringFingering(1,  2,  1),
+  ],
     tips: [
       'Index finger barres strings 5 and 1 at fret 2.',
       'This is a moveable A-shape barre — mastering it unlocks every major chord.',
@@ -330,6 +346,14 @@ const List<ChordData> allChords = [
       StringFingering(2, 4, 2),  // note: minor shape
       StringFingering(1, 3, 1),
     ],
+     beginnerFingerings: [
+    StringFingering(6, -1, -1),
+    StringFingering(5,  3,  1),
+    StringFingering(4,  5,  3),
+    StringFingering(3,  5,  4),
+    StringFingering(2,  4,  2),
+    StringFingering(1,  3,  1),
+  ],
     tips: [
       'A-shape minor barre at fret 3.',
       'The minor barre differs from major by one note — practice both back-to-back.',
@@ -396,6 +420,14 @@ const List<ChordData> allChords = [
       StringFingering(2, 1, 1),
       StringFingering(1, 1, 1),
     ],
+    beginnerFingerings: [
+    StringFingering(6, -1, -1),
+    StringFingering(5,  1,  1),
+    StringFingering(4,  3,  3),
+    StringFingering(3,  3,  4),
+    StringFingering(2,  1,  1),
+    StringFingering(1,  1,  1),
+  ],
     tips: [
       'Full barre at fret 1 with an Em-shape on top.',
       'One of the most common minor barre chords.',
@@ -418,6 +450,15 @@ const List<ChordData> allChords = [
       StringFingering(2, 3, 1),
       StringFingering(1, 3, 1),
     ],
+    beginnerFingerings: [
+    StringFingering(6, -1, -1),
+    StringFingering(5, -1, -1),
+    StringFingering(4,  5,  3),
+    StringFingering(3,  3,  1),
+    StringFingering(2,  3,  1),
+    StringFingering(1,  3,  1),
+  ],
+
     tips: [
       'Em-shape barre at fret 3.',
       'Barre index firmly across all strings at fret 3.',

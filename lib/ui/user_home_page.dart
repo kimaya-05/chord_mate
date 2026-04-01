@@ -11,6 +11,7 @@ import '../forum/forum_models.dart';
 import '../forum/forum_service.dart';
 import '../forum/post_viewer_page.dart';
 import '../learn/learn_home_page.dart';
+import '../chord_drills/transition_drill_page.dart';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Static content — tips and song of the day
@@ -73,8 +74,7 @@ class _MainShellState extends State<MainShell> {
   static const List<_NavItem> _items = [
     _NavItem(icon: Icons.home_outlined,       activeIcon: Icons.home,             label: 'Home'),
     _NavItem(icon: Icons.music_note_outlined, activeIcon: Icons.music_note,       label: 'Practice'),
-    _NavItem(icon: Icons.tune_outlined,       activeIcon: Icons.tune,             label: 'Tuner'),
-    _NavItem(icon: Icons.timer_outlined,      activeIcon: Icons.timer,            label: 'Metronome'),
+    _NavItem(icon: Icons.flash_on_outlined,   activeIcon: Icons.flash_on,         label: 'Drills'),
     _NavItem(icon: Icons.forum_outlined,      activeIcon: Icons.forum,            label: 'Forum'),
     _NavItem(icon: Icons.person_outline,      activeIcon: Icons.person,           label: 'Profile'),
   ];
@@ -88,8 +88,7 @@ class _MainShellState extends State<MainShell> {
         children: [
           UserHomePage(onNavigate: (i) => setState(() => _currentIndex = i)),
           const ChordListPage(),
-          const GuitarTunerPage(),
-          const MetronomePage(),
+          const TransitionDrillPage(),
           const ForumFeedPage(),
           const UserProfilePage(),
         ],
@@ -304,6 +303,32 @@ class _UserHomePageState extends State<UserHomePage> {
                   _buildRecentChords(recent),
                   const SizedBox(height: 28),
                 ],
+
+                // ── Tools ────────────────────────────────────────────────
+                _buildSectionLabel('Tools'),
+                const SizedBox(height: 10),
+                Row(
+                  children: [
+                    Expanded(
+                      child: _buildToolCard(
+                        context: context,
+                        title: 'Tuner',
+                        icon: Icons.tune,
+                        page: const GuitarTunerPage(),
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: _buildToolCard(
+                        context: context,
+                        title: 'Metronome',
+                        icon: Icons.timer,
+                        page: const MetronomePage(),
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 28),
 
                 // ── Quick access ─────────────────────────────────────────
                 _buildSectionLabel('Quick Access'),
@@ -710,7 +735,53 @@ class _UserHomePageState extends State<UserHomePage> {
         ),
       );
     }
+
+  // ── Tools ──────────────────────────────────────────────────────────────────
+
+  Widget _buildToolCard({
+    required BuildContext context,
+    required String title,
+    required IconData icon,
+    required Widget page,
+  }) {
+    return GestureDetector(
+      onTap: () => Navigator.push(
+        context,
+        MaterialPageRoute(builder: (_) => page),
+      ),
+      child: Container(
+        padding: const EdgeInsets.symmetric(vertical: 20),
+        decoration: BoxDecoration(
+          color: const Color(0xFF13131A),
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(color: Colors.white.withOpacity(0.07)),
+        ),
+        child: Column(
+          children: [
+            Container(
+              width: 46,
+              height: 46,
+              decoration: BoxDecoration(
+                color: Colors.greenAccent.withOpacity(0.12),
+                shape: BoxShape.circle,
+              ),
+              child: Icon(icon, color: Colors.greenAccent, size: 24),
+            ),
+            const SizedBox(height: 12),
+            Text(
+              title,
+              style: const TextStyle(
+                fontSize: 14,
+                fontWeight: FontWeight.w600,
+                color: Colors.white,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
   }
+}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // UserProfilePage

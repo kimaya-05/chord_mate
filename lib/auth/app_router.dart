@@ -9,6 +9,7 @@ import '../ui/metronome_page.dart';
 import '../chords/chord_list_page.dart';
 import '../ui/guitar_tuner_page.dart';
 import '../forum/moderator_dashboard_page.dart';
+import '../chord_drills/transition_drill_page.dart';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // AppRouter — single widget that decides what to show based on auth state.
@@ -281,12 +282,14 @@ class AppRoutes {
   static const String signup    = '/signup';
   static const String home      = '/home';
   static const String moderator = '/moderator';
+  static const String transitionDrill = '/transition-drill';
 
   static Map<String, WidgetBuilder> get routes => {
     login:     (_) => const LoginPage(),
     signup:    (_) => const SignupPage(),
     home:      (_) => const MainShell(),
     moderator: (_) => const ModeratorDashboardPage(),
+    transitionDrill: (_) => const TransitionDrillPage(),
   };
 }
 
