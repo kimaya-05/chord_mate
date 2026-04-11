@@ -12,24 +12,25 @@ import '../forum/forum_service.dart';
 import '../forum/post_viewer_page.dart';
 import '../learn/learn_home_page.dart';
 import '../chord_drills/transition_drill_page.dart';
+import '../ui/stats_page.dart';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Static content — tips and song of the day
 // ─────────────────────────────────────────────────────────────────────────────
 
 const List<String> _dailyTips = [
-  'Warm up with chromatic exercises before practicing chords — it loosens your fingers and reduces injury risk.',
+  'Warm up with chromatic exercises before practicing chords, it loosens your fingers and reduces injury risk.',
   'Practice chord transitions slowly at first. Speed comes naturally once the muscle memory is there.',
   'Use a metronome even for slow practice. Consistent timing is more important than speed.',
   'Record yourself playing occasionally. You\'ll catch mistakes your ears miss in the moment.',
   'The secret to a clean barre chord is pressing with the side of your index finger, not the pad.',
-  'Learn songs you actually love — motivation is the best practice tool there is.',
+  'Learn songs you actually love, motivation is the best practice tool there is.',
   'Rest is part of practice. Short daily sessions beat long infrequent ones every time.',
-  'When a chord buzzes, check your thumb position behind the neck first — it affects everything.',
+  'When a chord buzzes, check your thumb position behind the neck first, it affects everything.',
   'Nail the first and last beat of every bar. The middle fills itself in over time.',
-  'Calluses take 4–6 weeks to build. Play through the soreness — it gets easier.',
+  'Calluses take 4–6 weeks to build. Play through the soreness, it gets easier.',
   'Try playing without looking at your fretting hand. It builds spatial muscle memory faster.',
-  'Strumming patterns are easier to learn if you say them out loud — "down up down up".',
+  'Strumming patterns are easier to learn if you say them out loud, "down up down up".',
   'Tune your guitar every single time before you play. Your ear learns pitch faster that way.',
   'The best practice session is the one you actually do, even if it\'s just 10 minutes.',
 ];
@@ -324,6 +325,15 @@ class _UserHomePageState extends State<UserHomePage> {
                         title: 'Metronome',
                         icon: Icons.timer,
                         page: const MetronomePage(),
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: _buildToolCard(
+                        context: context,
+                        title: 'Stats',
+                        icon: Icons.bar_chart_rounded,
+                        page: const StatsPage(),
                       ),
                     ),
                   ],

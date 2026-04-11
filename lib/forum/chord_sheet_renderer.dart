@@ -83,10 +83,6 @@ List<_ParsedLine> _parseContent(String content) {
   }).toList();
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// ChordSheetRenderer
-// ─────────────────────────────────────────────────────────────────────────────
-
 class ChordSheetRenderer extends StatelessWidget {
   final String content;
   final int    transposeSemitones;

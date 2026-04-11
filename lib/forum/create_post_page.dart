@@ -6,7 +6,8 @@ import 'forum_service.dart';
 import 'chord_sheet_renderer.dart';
 
 class CreatePostPage extends StatefulWidget {
-  const CreatePostPage({super.key});
+  final ForumPost? existingPost;
+  const CreatePostPage({super.key, this.existingPost});
 
   @override
   State<CreatePostPage> createState() => _CreatePostPageState();
@@ -48,6 +49,17 @@ class _CreatePostPageState extends State<CreatePostPage>
         setState(() => _showPreview = _tabCtrl.index == 1);
       }
     });
+
+     if (widget.existingPost != null) {
+        final p = widget.existingPost!;
+        _titleCtrl.text   = p.title;
+        _artistCtrl.text  = p.artist;
+        _contentCtrl.text = p.content;
+        _key        = p.key;
+        _capo       = p.capo;
+        _difficulty = p.difficulty;
+        _genre      = p.genre;
+      }
 
     // Rebuild for progress bar whenever text changes
     _titleCtrl.addListener(() => setState(() {}));

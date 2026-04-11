@@ -4,6 +4,7 @@ import 'package:flutter/services.dart';
 import '../services/pb_service.dart';
 import '../chords/chord_library.dart';
 import '../services/audio_service.dart';
+import '../services/metronome_service.dart';
 import 'results_screen.dart';
 
 class DrillScreen extends StatefulWidget {
@@ -28,9 +29,9 @@ class DrillScreen extends StatefulWidget {
 class DrillScreenState extends State<DrillScreen>
     with SingleTickerProviderStateMixin {
   final AudioService _audio = AudioService();
+  late final MetronomeService _metronome;
  
   // Beat / metronome state
-  Timer? _beatTimer;
   Timer? _sampleTimer;   // fires 300 ms after each beat
   Timer? _countdownTimer;
  
@@ -69,6 +70,7 @@ class DrillScreenState extends State<DrillScreen>
   @override
   void initState() {
     super.initState();
+    _metronome = MetronomeService(onBeat: _onBeatTick);
     _pulseCtrl = AnimationController(
       vsync: this,
       duration: const Duration(milliseconds: 120),
@@ -77,20 +79,23 @@ class DrillScreenState extends State<DrillScreen>
       CurvedAnimation(parent: _pulseCtrl, curve: Curves.easeOut),
     );
     _initAudio();
+    
   }
  
   @override
   void dispose() {
-    _beatTimer?.cancel();
     _sampleTimer?.cancel();
     _countdownTimer?.cancel();
     _audio.stop();
+    _metronome.stop();
+    _metronome.dispose();
     _audio.dispose();
     _pulseCtrl.dispose();
     super.dispose();
   }
  
   Future<void> _initAudio() async {
+    await _metronome.init();
     await _audio.init();
     await _audio.startWithDSP((result) {
       if (!mounted) return;
@@ -130,44 +135,7 @@ class DrillScreenState extends State<DrillScreen>
   void _startDrill() {
     setState(() => _isRunning = true);
  
-    final beatDuration =
-        Duration(milliseconds: (60000 / widget.bpm).round());
-    // Sample window: 300 ms after the beat — gives chord time to stabilise
-    final sampleOffset = const Duration(milliseconds: 300);
- 
-    _beatTimer = Timer.periodic(beatDuration, (t) {
-      if (!mounted) return;
- 
-      // Trigger beat flash & haptic
-      setState(() {
-        _beatFlash = true;
-        _isOnChordA = _beatIndex.isEven;
-      });
-      HapticFeedback.lightImpact();
-      _pulseCtrl.forward().then((_) => _pulseCtrl.reverse());
- 
-      // Schedule beat flash off
-      Future.delayed(const Duration(milliseconds: 80), () {
-        if (mounted) setState(() => _beatFlash = false);
-      });
- 
-      // Schedule sample 300 ms after beat
-      _sampleTimer?.cancel();
-      _sampleTimer = Timer(sampleOffset, () {
-        if (!mounted || !_isRunning) return;
-        _judgeTransition();
-      });
- 
-      _beatIndex++;
- 
-      // Duration-based ending
-      if (widget.targetSeconds != null) {
-        final newElapsed = _elapsedSeconds + 1;
-        if (newElapsed >= widget.targetSeconds! * widget.bpm ~/ 60) {
-          _stopDrill();
-        }
-      }
-    });
+    _metronome.start(widget.bpm);
  
     // Elapsed seconds counter (separate from beat)
     if (widget.targetSeconds != null) {
@@ -180,6 +148,41 @@ class DrillScreenState extends State<DrillScreen>
           _stopDrill();
         }
       });
+    }
+  }
+
+  void _onBeatTick(int tick) {
+    if (!mounted) return;
+
+    // Trigger beat flash & haptic
+    setState(() {
+      _beatFlash = true;
+      _isOnChordA = _beatIndex.isEven;
+    });
+    HapticFeedback.lightImpact();
+    _pulseCtrl.forward().then((_) => _pulseCtrl.reverse());
+
+    // Schedule beat flash off
+    Future.delayed(const Duration(milliseconds: 80), () {
+      if (mounted) setState(() => _beatFlash = false);
+    });
+
+    // Schedule sample 300 ms after beat — gives chord time to stabilise
+    final sampleOffset = const Duration(milliseconds: 300);
+    _sampleTimer?.cancel();
+    _sampleTimer = Timer(sampleOffset, () {
+      if (!mounted || !_isRunning) return;
+      _judgeTransition();
+    });
+
+    _beatIndex++;
+
+    // Duration-based ending
+    if (widget.targetSeconds != null) {
+      final newElapsed = _elapsedSeconds + 1;
+      if (newElapsed >= widget.targetSeconds! * widget.bpm ~/ 60) {
+        _stopDrill();
+      }
     }
   }
  
@@ -225,7 +228,7 @@ class DrillScreenState extends State<DrillScreen>
   }
  
   Future<void> _stopDrill() async {
-    _beatTimer?.cancel();
+    _metronome.stop();
     _sampleTimer?.cancel();
     _countdownTimer?.cancel();
     _audio.stop();
@@ -282,7 +285,7 @@ class DrillScreenState extends State<DrillScreen>
         leading: IconButton(
           icon: const Icon(Icons.close, color: Colors.white54),
           onPressed: () {
-            _beatTimer?.cancel();
+            _metronome.stop();
             _sampleTimer?.cancel();
             _countdownTimer?.cancel();
             Navigator.pop(context);

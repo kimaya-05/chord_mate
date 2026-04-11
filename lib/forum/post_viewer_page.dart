@@ -5,6 +5,7 @@ import '../auth/auth_provider.dart';
 import 'forum_models.dart';
 import 'forum_service.dart';
 import 'chord_sheet_renderer.dart';
+import 'create_post_page.dart';
 
 class PostViewerPage extends StatefulWidget {
   final ForumPost post;
@@ -161,134 +162,79 @@ class _PostViewerPageState extends State<PostViewerPage> {
 
   // ── Edit ─────────────────────────────────────────────────────────────────────
 
-  void _showEditSheet() {
-    final titleCtrl   = TextEditingController(text: _post.title);
-    final artistCtrl  = TextEditingController(text: _post.artist);
-    final contentCtrl = TextEditingController(text: _post.content);
-    bool saving = false;
-
-    showModalBottomSheet(
-      context: context,
-      isScrollControlled: true,
-      backgroundColor: const Color(0xFF13131A),
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+  void _showEditSheet() async {
+    final updated = await Navigator.push<ForumPost>(
+      context,
+      MaterialPageRoute(
+        builder: (_) => CreatePostPage(existingPost: _post),
       ),
-      builder: (ctx) {
-        return StatefulBuilder(
-          builder: (ctx, setSheetState) {
-            return Padding(
-              padding: EdgeInsets.only(
-                left: 20,
-                right: 20,
-                top: 24,
-                bottom: MediaQuery.of(ctx).viewInsets.bottom + 24,
-              ),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  // Header
-                  Row(
-                    children: [
-                      const Text(
-                        'Edit post',
-                        style: TextStyle(
-                            color: Colors.white,
-                            fontSize: 16,
-                            fontWeight: FontWeight.w700),
-                      ),
-                      const Spacer(),
-                      IconButton(
-                        icon: const Icon(Icons.close,
-                            color: Colors.white38, size: 20),
-                        onPressed: () => Navigator.pop(ctx),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 16),
-
-                  // Title field
-                  _EditField(
-                    controller: titleCtrl,
-                    label: 'Title',
-                    maxLines: 1,
-                  ),
-                  const SizedBox(height: 12),
-
-                  // Artist field
-                  _EditField(
-                    controller: artistCtrl,
-                    label: 'Artist',
-                    maxLines: 1,
-                  ),
-                  const SizedBox(height: 12),
-
-                  // Content field
-                  _EditField(
-                    controller: contentCtrl,
-                    label: 'Chord sheet content',
-                    maxLines: 10,
-                  ),
-                  const SizedBox(height: 20),
-
-                  // Save button
-                  SizedBox(
-                    width: double.infinity,
-                    child: ElevatedButton(
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: Colors.greenAccent,
-                        foregroundColor: Colors.black,
-                        padding: const EdgeInsets.symmetric(vertical: 14),
-                        shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(12)),
-                      ),
-                      onPressed: saving
-                          ? null
-                          : () async {
-                              setSheetState(() => saving = true);
-                              try {
-                                final updated = _post.copyWith(
-                                  title:   titleCtrl.text.trim(),
-                                  artist:  artistCtrl.text.trim(),
-                                  content: contentCtrl.text,
-                                );
-                                await _service.updatePost(updated);
-                                if (mounted) {
-                                  setState(() => _post = updated);
-                                  Navigator.pop(ctx);
-                                  ScaffoldMessenger.of(context).showSnackBar(
-                                    const SnackBar(
-                                        content: Text('Post updated!')),
-                                  );
-                                }
-                              } finally {
-                                if (ctx.mounted) {
-                                  setSheetState(() => saving = false);
-                                }
-                              }
-                            },
-                      child: saving
-                          ? const SizedBox(
-                              height: 18,
-                              width: 18,
-                              child: CircularProgressIndicator(
-                                  strokeWidth: 2,
-                                  color: Colors.black54),
-                            )
-                          : const Text('Save changes',
-                              style: TextStyle(
-                                  fontWeight: FontWeight.w700,
-                                  fontSize: 14)),
-                    ),
-                  ),
-                ],
-              ),
-            );
-          },
-        );
-      },
     );
+    // If the user saved, update the local copy so the viewer reflects changes
+    if (updated != null && mounted) {
+      setState(() => _post = updated);
+    }
+  }
+
+  // ── Delete ──────────────────────────────────────────────────────────────────
+
+  Future<void> _confirmDeletePost() async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: const Color(0xFF1A1A24),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: const Text('Delete post?',
+            style: TextStyle(
+                color: Colors.white,
+                fontSize: 17,
+                fontWeight: FontWeight.w700)),
+        content: Text(
+          'This will permanently delete "${_post.title}". This action cannot be undone.',
+          style: TextStyle(
+              color: Colors.white.withOpacity(0.6),
+              fontSize: 14,
+              height: 1.5),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: Text('Cancel',
+                style: TextStyle(
+                    color: Colors.white.withOpacity(0.5),
+                    fontWeight: FontWeight.w600)),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            style: TextButton.styleFrom(
+              backgroundColor: Colors.redAccent.withOpacity(0.15),
+              shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(8)),
+            ),
+            child: const Text('Delete',
+                style: TextStyle(
+                    color: Colors.redAccent, fontWeight: FontWeight.w700)),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed != true) return;
+
+    try {
+      await _service.deletePost(_post.id);
+      if (mounted) {
+        Navigator.pop(context);
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Post deleted.')),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Failed to delete post: $e')),
+        );
+      }
+    }
   }
 
   // ── Comment ─────────────────────────────────────────────────────────────────
@@ -359,6 +305,14 @@ class _PostViewerPageState extends State<PostViewerPage> {
               tooltip: 'Edit post',
               onPressed: _showEditSheet,
             ),
+          // Delete — only shown to the post's author
+          if (isAuthor)
+            IconButton(
+              icon: const Icon(Icons.delete_outline,
+                  color: Colors.redAccent, size: 20),
+              tooltip: 'Delete post',
+              onPressed: _confirmDeletePost,
+            ),
           IconButton(
             icon: Icon(Icons.flag_outlined,
                 color: _hasReported
@@ -407,7 +361,7 @@ class _PostViewerPageState extends State<PostViewerPage> {
                     const SizedBox(height: 32),
 
                     // Rating
-                    _buildRatingSection(),
+                    _buildRatingSection(isAuthor),
                     const SizedBox(height: 32),
 
                     // Comments
@@ -470,17 +424,27 @@ class _PostViewerPageState extends State<PostViewerPage> {
           // Autoscroll speed (only when active)
           if (_autoscroll) ...[
             const Icon(Icons.speed, size: 14, color: Colors.white38),
-            SizedBox(
-              width: 80,
-              child: Slider(
-                value: _scrollSpeed,
-                min: 0.3,
-                max: 3.0,
-                activeColor: Colors.greenAccent,
-                inactiveColor: Colors.white12,
-                onChanged: (v) => setState(() => _scrollSpeed = v),
-              ),
+            const SizedBox(width: 6),
+            DropdownButton<double>(
+              value: _scrollSpeed,
+              dropdownColor: const Color(0xFF13131A),
+              underline: const SizedBox.shrink(),
+              style: const TextStyle(
+                  color: Colors.greenAccent,
+                  fontSize: 12,
+                  fontWeight: FontWeight.w600),
+              items: const [
+                DropdownMenuItem(value: 0.3, child: Text('Very slow')),
+                DropdownMenuItem(value: 0.7, child: Text('Slow')),
+                DropdownMenuItem(value: 1.0, child: Text('Normal')),
+                DropdownMenuItem(value: 1.8, child: Text('Fast')),
+                DropdownMenuItem(value: 3.0, child: Text('Very fast')),
+              ],
+              onChanged: (v) {
+                if (v != null) setState(() => _scrollSpeed = v);
+              },
             ),
+            const SizedBox(width: 8),
           ],
 
           // Autoscroll toggle
@@ -559,35 +523,41 @@ class _PostViewerPageState extends State<PostViewerPage> {
 
   // ── Rating section ────────────────────────────────────────────────────────
 
-  Widget _buildRatingSection() {
-    return Container(
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: const Color(0xFF13131A),
-        borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: Colors.white.withOpacity(0.07)),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(children: [
-            const Icon(Icons.star_rounded, color: Colors.amber, size: 16),
-            const SizedBox(width: 6),
-            Text(
-              _post.ratingCount == 0
-                  ? 'No ratings yet'
-                  : '${_post.averageRating.toStringAsFixed(1)} / 5  (${_post.ratingCount} ${_post.ratingCount == 1 ? 'rating' : 'ratings'})',
-              style: const TextStyle(
-                  color: Colors.amber,
-                  fontWeight: FontWeight.w600,
-                  fontSize: 13),
-            ),
-          ]),
-          const SizedBox(height: 12),
+  Widget _buildRatingSection(bool isAuthor) {
+  return Container(
+    padding: const EdgeInsets.all(16),
+    decoration: BoxDecoration(
+      color: const Color(0xFF13131A),
+      borderRadius: BorderRadius.circular(14),
+      border: Border.all(color: Colors.white.withOpacity(0.07)),
+    ),
+    child: Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(children: [
+          const Icon(Icons.star_rounded, color: Colors.amber, size: 16),
+          const SizedBox(width: 6),
+          Text(
+            _post.ratingCount == 0
+                ? 'No ratings yet'
+                : '${_post.averageRating.toStringAsFixed(1)} / 5  (${_post.ratingCount} ${_post.ratingCount == 1 ? 'rating' : 'ratings'})',
+            style: const TextStyle(
+                color: Colors.amber,
+                fontWeight: FontWeight.w600,
+                fontSize: 13),
+          ),
+        ]),
+        const SizedBox(height: 12),
+        if (isAuthor)
+          Text(
+            'You cannot rate your own post.',
+            style: TextStyle(
+                fontSize: 12, color: Colors.white.withOpacity(0.3)),
+          )
+        else ...[
           Text('Rate this chord sheet:',
               style: TextStyle(
-                  fontSize: 12,
-                  color: Colors.white.withOpacity(0.4))),
+                  fontSize: 12, color: Colors.white.withOpacity(0.4))),
           const SizedBox(height: 8),
           Row(
             children: List.generate(5, (i) {
@@ -607,9 +577,10 @@ class _PostViewerPageState extends State<PostViewerPage> {
             }),
           ),
         ],
-      ),
-    );
-  }
+      ],
+    ),
+  );
+}
 
   // ── Comments ──────────────────────────────────────────────────────────────
 

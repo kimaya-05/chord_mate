@@ -24,6 +24,8 @@ const List<_GuitarString> _standardTuning = [
   _GuitarString('e', 1, 329.63),
 ];
 
+final Tween<double> _barTween = Tween<double>(begin: 0, end: 0);
+
 enum _TuneState { idle, flat, inTune, sharp }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -84,7 +86,9 @@ class _GuitarTunerPageState extends State<GuitarTunerPage>
       vsync: this,
       duration: const Duration(milliseconds: 100),
     );
-    _barAnim = AlwaysStoppedAnimation(0);
+    _barAnim = _barTween.animate(
+    CurvedAnimation(parent: _barCtrl, curve: Curves.easeOut));
+
   }
 
   @override
@@ -220,11 +224,10 @@ class _GuitarTunerPageState extends State<GuitarTunerPage>
   }
 
   void _animateBar(double targetCents) {
-    _barAnim = Tween<double>(
-      begin: _lastBarValue,
-      end: targetCents.clamp(-_maxDisplayCents, _maxDisplayCents),
-    ).animate(CurvedAnimation(parent: _barCtrl, curve: Curves.easeOut));
-    _lastBarValue = targetCents.clamp(-_maxDisplayCents, _maxDisplayCents);
+    final double clamped = targetCents.clamp(-_maxDisplayCents, _maxDisplayCents);
+    _barTween.begin = _lastBarValue;
+    _barTween.end   = clamped;
+    _lastBarValue   = clamped;
     _barCtrl.forward(from: 0);
   }
 
