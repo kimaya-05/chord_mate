@@ -64,6 +64,36 @@ class ForumPost {
 
   String get capoLabel => capo == 0 ? 'No capo' : 'Capo $capo';
 
+  ForumPost copyWith({
+    String?   title,
+    String?   artist,
+    String?   key,
+    int?      capo,
+    String?   difficulty,
+    String?   genre,
+    String?   content,
+    DateTime? updatedAt,
+  }) {
+    return ForumPost(
+      id:                 id,
+      authorUid:          authorUid,
+      authorName:         authorName,
+      title:              title      ?? this.title,
+      artist:             artist     ?? this.artist,
+      key:                key        ?? this.key,
+      capo:               capo       ?? this.capo,
+      difficulty:         difficulty ?? this.difficulty,
+      genre:              genre      ?? this.genre,
+      content:            content    ?? this.content,
+      ratingSum:          ratingSum,
+      ratingCount:        ratingCount,
+      reportCount:        reportCount,
+      authorShadowBanned: authorShadowBanned,
+      createdAt:          createdAt,
+      updatedAt:          updatedAt  ?? this.updatedAt,
+    );
+  }
+
   factory ForumPost.fromFirestore(DocumentSnapshot doc) {
     final d = doc.data() as Map<String, dynamic>;
     return ForumPost(
@@ -197,9 +227,6 @@ class ModeratorReport {
   };
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// InfractionRecord — one entry in a user's moderation history
-// ─────────────────────────────────────────────────────────────────────────────
 
 class InfractionRecord {
   final String   id;
@@ -231,14 +258,6 @@ class InfractionRecord {
   };
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// AppUserRecord — user document as seen by moderators
-//
-// Fields that exist at signup:  displayName, email, role, createdAt
-// Fields written on first mod action: status, shadowBanned, postCount,
-//   majorInfractions, minorInfractions, infractionHistory
-// All moderation fields default gracefully if absent.
-// ─────────────────────────────────────────────────────────────────────────────
 
 class AppUserRecord {
   final String                 uid;
@@ -275,8 +294,6 @@ class AppUserRecord {
   factory AppUserRecord.fromFirestore(DocumentSnapshot doc) {
     final d = doc.data() as Map<String, dynamic>;
 
-    // infractionHistory is stored as an array of maps on the user doc.
-    // Defaults to empty list if the field hasn't been written yet.
     final rawHistory = d['infractionHistory'] as List<dynamic>? ?? [];
     final history = rawHistory.asMap().entries.map((e) {
       return InfractionRecord.fromMap(
@@ -290,13 +307,11 @@ class AppUserRecord {
       displayName:       d['displayName']       as String? ?? 'Unknown',
       email:             d['email']             as String? ?? '',
       role:              d['role']              as String? ?? 'user',
-      // All fields below may be absent on users created before mod system
       status:            d['status']            as String? ?? 'active',
       shadowBanned:      d['shadowBanned']      as bool?   ?? false,
       postCount:         (d['postCount']        as num?)?.toInt() ?? 0,
       majorInfractions:  (d['majorInfractions'] as num?)?.toInt() ?? 0,
       minorInfractions:  (d['minorInfractions'] as num?)?.toInt() ?? 0,
-      // Firestore field is 'createdAt' — this is the signup timestamp
       joinedAt:          (d['createdAt']        as Timestamp?)?.toDate() ?? DateTime.now(),
       restrictionEndsAt: (d['restrictionEndsAt'] as Timestamp?)?.toDate(),
       infractionHistory: history,

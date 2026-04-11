@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import '../chords/chord_library.dart';
 import 'drill_screen.dart';
+import '../services/pb_service.dart'; 
 
  
 // ─────────────────────────────────────────────────────────────────────────────
@@ -67,8 +68,59 @@ class _TransitionDrillPageState extends State<TransitionDrillPage> {
   bool _useTransitionCount = true; // true = # transitions, false = duration
   int _bpm = 60;
  
-  // Suggested pair filter
-  Difficulty? _diffFilter; // null = show all
+  Difficulty? _diffFilter; 
+
+  PersonalBest? _loadedPb;
+  bool _pbLoading = false;
+
+  Widget _buildPbBadge() {
+      if (_chordA == null || _chordB == null) return const SizedBox.shrink();
+      if (_pbLoading) {
+        return Padding(
+          padding: const EdgeInsets.only(bottom: 12),
+          child: Row(children: [
+            SizedBox(
+              width: 12, height: 12,
+              child: CircularProgressIndicator(
+                strokeWidth: 1.5,
+                color: Colors.greenAccent.withOpacity(0.5),
+              ),
+            ),
+            const SizedBox(width: 8),
+            Text('Loading personal best…',
+                style: TextStyle(fontSize: 12, color: Colors.white.withOpacity(0.35))),
+          ]),
+        );
+      }
+      if (_loadedPb == null) {
+        return Padding(
+          padding: const EdgeInsets.only(bottom: 12),
+          child: Text('No personal best yet — be the first!',
+              style: TextStyle(fontSize: 12, color: Colors.white.withOpacity(0.3))),
+        );
+      }
+      final pct = (_loadedPb!.accuracy * 100).toStringAsFixed(0);
+      return Padding(
+        padding: const EdgeInsets.only(bottom: 12),
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+          decoration: BoxDecoration(
+            color: Colors.amber.withOpacity(0.08),
+            borderRadius: BorderRadius.circular(10),
+            border: Border.all(color: Colors.amber.withOpacity(0.25)),
+          ),
+          child: Row(children: [
+            const Icon(Icons.emoji_events_rounded, size: 15, color: Colors.amber),
+            const SizedBox(width: 8),
+            Text(
+              'Personal best: ${_loadedPb!.correct}/${_loadedPb!.total}  •  $pct% accuracy',
+              style: const TextStyle(
+                  fontSize: 13, fontWeight: FontWeight.w600, color: Colors.amber),
+            ),
+          ]),
+        ),
+      );
+    }
  
   bool get _canStart =>
       _chordA != null && _chordB != null && _chordA != _chordB;
@@ -77,6 +129,16 @@ class _TransitionDrillPageState extends State<TransitionDrillPage> {
   void dispose() {
     _targetCtrl.dispose();
     super.dispose();
+  }
+
+  Future<void> _loadPb() async {
+    if (_chordA == null || _chordB == null) {
+      setState(() => _loadedPb = null);
+      return;
+    }
+    setState(() => _pbLoading = true);
+    final pb = await PbService.load(_chordA!.mlLabel, _chordB!.mlLabel);
+    if (mounted) setState(() { _loadedPb = pb; _pbLoading = false; });
   }
  
   void _selectSuggestedPair(_SuggestedPair pair) {
@@ -87,6 +149,7 @@ class _TransitionDrillPageState extends State<TransitionDrillPage> {
       _chordB = b;
       _freestyleMode = false;
     });
+    _loadPb();
   }
  
   void _startDrill() {
@@ -133,14 +196,13 @@ class _TransitionDrillPageState extends State<TransitionDrillPage> {
             const SizedBox(height: 24),
             _buildSessionConfig(),
             const SizedBox(height: 28),
+            _buildPbBadge(),
             _buildStartButton(),
           ],
         ),
       ),
     );
   }
- 
-  // ── Intro card ─────────────────────────────────────────────────────────────
  
   Widget _buildIntroCard() {
     return Container(
@@ -171,7 +233,6 @@ class _TransitionDrillPageState extends State<TransitionDrillPage> {
     );
   }
  
-  // ── Suggested pairs ────────────────────────────────────────────────────────
  
   Widget _buildSuggestedPairsSection() {
     final filtered = _diffFilter == null
@@ -293,7 +354,6 @@ class _TransitionDrillPageState extends State<TransitionDrillPage> {
     );
   }
  
-  // ── Freestyle picker ───────────────────────────────────────────────────────
  
   Widget _buildFreestylePicker() {
     return Column(
@@ -310,6 +370,7 @@ class _TransitionDrillPageState extends State<TransitionDrillPage> {
                   _chordA = null;
                   _chordB = null;
                 }
+                _loadPb();
               }),
               child: Text(
                 _freestyleMode ? 'Cancel' : 'Pick manually',
@@ -330,7 +391,10 @@ class _TransitionDrillPageState extends State<TransitionDrillPage> {
                   label: 'Chord A',
                   selected: _chordA,
                   exclude: _chordB,
-                  onSelected: (c) => setState(() => _chordA = c),
+                  onSelected: (c) {
+                    setState(() => _chordA = c);
+                    _loadPb(); 
+                  },
                 ),
               ),
               Padding(
@@ -343,7 +407,10 @@ class _TransitionDrillPageState extends State<TransitionDrillPage> {
                   label: 'Chord B',
                   selected: _chordB,
                   exclude: _chordA,
-                  onSelected: (c) => setState(() => _chordB = c),
+                  onSelected: (c) {
+                    setState(() => _chordB = c);
+                    _loadPb(); 
+                  },                              
                 ),
               ),
             ],
@@ -383,10 +450,13 @@ class _TransitionDrillPageState extends State<TransitionDrillPage> {
           ),
           const Spacer(),
           GestureDetector(
-            onTap: () => setState(() {
-              _chordA = null;
-              _chordB = null;
-            }),
+            onTap: () {
+              setState(() {
+                _chordA = null;
+                _chordB = null;
+              });
+              _loadPb(); 
+            },
             child: Icon(Icons.close,
                 size: 16, color: Colors.white.withOpacity(0.3)),
           ),
@@ -453,7 +523,6 @@ class _TransitionDrillPageState extends State<TransitionDrillPage> {
     );
   }
  
-  // ── Session config ─────────────────────────────────────────────────────────
  
   Widget _buildSessionConfig() {
     return Column(
@@ -505,7 +574,6 @@ class _TransitionDrillPageState extends State<TransitionDrillPage> {
  
         const SizedBox(height: 16),
  
-        // Target type toggle + input
         Row(
           children: [
             _toggleOption(
@@ -616,7 +684,7 @@ class _TransitionDrillPageState extends State<TransitionDrillPage> {
     );
   }
  
-  // ── Start button ───────────────────────────────────────────────────────────
+  
  
   Widget _buildStartButton() {
     return AnimatedOpacity(
@@ -660,10 +728,7 @@ class _TransitionDrillPageState extends State<TransitionDrillPage> {
       );
 }
  
-// ─────────────────────────────────────────────────────────────────────────────
-// Chord Picker Bottom Sheet
-// ─────────────────────────────────────────────────────────────────────────────
- 
+
 class _ChordPickerSheet extends StatelessWidget {
   final ChordData? exclude;
   final List<ChordData> practiceChords;
@@ -719,3 +784,4 @@ class _ChordPickerSheet extends StatelessWidget {
     );
   }
 }
+

@@ -1258,10 +1258,13 @@ class _ReportCard extends StatelessWidget {
                 const SizedBox(height: 16),
                 GestureDetector(
                   onTap: () async {
-                    await service.updatePost(post.id,
-                        content: contentCtrl.text,
-                        key: key, capo: capo,
-                        difficulty: difficulty, genre: genre);
+                    await service.updatePost(post.copyWith(
+                      content: contentCtrl.text,
+                      key: key,
+                      capo: capo,
+                      difficulty: difficulty,
+                      genre: genre,
+                    ));
                     if (ctx.mounted) Navigator.pop(ctx);
                     if (context.mounted) {
                       ScaffoldMessenger.of(context).showSnackBar(

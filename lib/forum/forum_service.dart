@@ -23,20 +23,6 @@ class ForumService {
 
   // ── Posts — read ──────────────────────────────────────────────────────────
 
-  // Stream<List<ForumPost>> postsStream({
-  //   String? genre,
-  //   String? difficulty,
-  //   String? key,
-  // }) {
-  //   Query q = _posts.orderBy('createdAt', descending: true);
-  //   if (genre      != null) q = q.where('genre',      isEqualTo: genre);
-  //   if (difficulty != null) q = q.where('difficulty', isEqualTo: difficulty);
-  //   if (key        != null) q = q.where('key',        isEqualTo: key);
-  //   return q.snapshots().map(
-  //     (s) => s.docs.map(ForumPost.fromFirestore).toList(),
-  //   );
-  // }
-
   Future<List<ForumPost>> searchPosts(String query) async {
     final snap = await _posts.orderBy('createdAt', descending: true).get();
     final all  = snap.docs.map(ForumPost.fromFirestore).toList();
@@ -51,8 +37,6 @@ class ForumService {
 
   Future<ForumPost?> songOfTheDay() async {
     try {
-      // Fetch recent posts and pick the best-rated one client-side.
-      // Avoids multiple inequality filters which Firestore doesn't support.
       final since = DateTime.now().subtract(const Duration(days: 7));
       final snap = await _posts
           .where('createdAt', isGreaterThan: Timestamp.fromDate(since))
@@ -62,13 +46,11 @@ class ForumService {
 
       if (snap.docs.isNotEmpty) {
         final posts = snap.docs.map(ForumPost.fromFirestore).toList();
-        // Pick highest average rating; fall back to most recent if none rated
         posts.sort((a, b) => b.averageRating.compareTo(a.averageRating));
         return posts.first;
       }
     } catch (_) {}
 
-    // Fallback — just return the most recent post
     try {
       final fallback = await _posts
           .orderBy('createdAt', descending: true)
@@ -97,8 +79,8 @@ class ForumService {
 
   // ── Posts — write ─────────────────────────────────────────────────────────
 
-  /// Stream of posts. For regular users, shadow-banned authors' posts are
-  /// filtered out. Moderators see everything.
+  /// Stream of posts. Shadow-banned authors' posts are filtered out for
+  /// regular users; moderators see everything.
   Stream<List<ForumPost>> postsStream({
     String? genre,
     String? difficulty,
@@ -112,21 +94,14 @@ class ForumService {
     return q.snapshots().map((s) {
       final all = s.docs.map(ForumPost.fromFirestore).toList();
       if (isModerator) return all;
-      // Filter out posts by shadow-banned users for regular users
-      return all
-          .where((p) => !(p.authorShadowBanned))
-          .toList();
+      return all.where((p) => !p.authorShadowBanned).toList();
     });
   }
 
-  /// Creates a post. Throws [StateError] if the user is shadow-banned
-  /// or otherwise not allowed to post.
+  /// Creates a post. Throws [StateError] if the user is not permitted to post.
   Future<String> createPost(ForumPost post, {bool canPost = true}) async {
-    if (!canPost) {
-      throw StateError('User is not permitted to post.');
-    }
-    // Check if the author is currently shadow-banned and stamp the post
-    // so the feed filter catches it immediately.
+    if (!canPost) throw StateError('User is not permitted to post.');
+
     final userDoc = await _users.doc(post.authorUid).get();
     final isShadowBanned = userDoc.exists
         ? (userDoc.data() as Map<String, dynamic>)['shadowBanned'] as bool? ?? false
@@ -141,20 +116,18 @@ class ForumService {
     return ref.id;
   }
 
-  Future<void> updatePost(
-    String postId, {
-    required String content,
-    required String key,
-    required int    capo,
-    required String difficulty,
-    required String genre,
-  }) async {
-    await _posts.doc(postId).update({
-      'content':    content,
-      'key':        key,
-      'capo':       capo,
-      'difficulty': difficulty,
-      'genre':      genre,
+  /// Updates the editable fields of a post. Accepts a [ForumPost] produced
+  /// via [ForumPost.copyWith] and writes only the user-editable fields plus
+  /// a fresh [updatedAt] timestamp.
+  Future<void> updatePost(ForumPost post) async {
+    await _posts.doc(post.id).update({
+      'title':      post.title,
+      'artist':     post.artist,
+      'content':    post.content,
+      'key':        post.key,
+      'capo':       post.capo,
+      'difficulty': post.difficulty,
+      'genre':      post.genre,
       'updatedAt':  Timestamp.fromDate(DateTime.now()),
     });
   }
@@ -220,8 +193,6 @@ class ForumService {
     return doc.exists;
   }
 
-  /// Files a report. Writes to the post's reports subcollection (dedup guard),
-  /// increments the post's reportCount, and adds to moderator_reports.
   Future<void> reportPost({
     required ForumPost post,
     required String    reporterUid,
@@ -230,18 +201,15 @@ class ForumService {
   }) async {
     final batch = _db.batch();
 
-    // Dedup guard — one doc per reporter per post
     batch.set(_reports(post.id).doc(reporterUid), {
       'reason':    reason,
       'createdAt': Timestamp.fromDate(DateTime.now()),
     });
 
-    // Increment report counter on the post
     batch.update(_posts.doc(post.id), {
       'reportCount': FieldValue.increment(1),
     });
 
-    // Write to moderator_reports — this is what the dashboard reads
     final modRef = _modReports.doc();
     batch.set(modRef, ModeratorReport(
       id:            modRef.id,
@@ -260,8 +228,6 @@ class ForumService {
 
   // ── Moderator — reports ───────────────────────────────────────────────────
 
-  /// [resolvedOnly] = false → unresolved only
-  /// [resolvedOnly] = true  → resolved only
   Stream<List<ModeratorReport>> modReportsStream({
     required bool resolvedOnly,
   }) {
@@ -276,7 +242,6 @@ class ForumService {
     await _modReports.doc(reportId).update({'resolved': true});
   }
 
-  /// Deletes the post and resolves every open report that references it.
   Future<void> moderatorDeletePost(String postId) async {
     await deletePost(postId);
     final open = await _modReports
@@ -293,7 +258,6 @@ class ForumService {
 
   // ── Moderator — users ─────────────────────────────────────────────────────
 
-  /// Stream of every user document, newest first.
   Stream<List<AppUserRecord>> usersStream() {
     return _users
         .orderBy('createdAt', descending: true)
@@ -301,54 +265,45 @@ class ForumService {
         .map((s) => s.docs.map(AppUserRecord.fromFirestore).toList());
   }
 
-  /// Warn — minor infraction, status → 'warned' (unless already worse).
   Future<void> warnUser(String uid) async {
     await _applyInfraction(
-      uid:      uid,
-      severity: 'minor',
-      reason:   'Warning issued by moderator',
-      // Only upgrade status if currently active
-      newStatus: 'warned',
+      uid:          uid,
+      severity:     'minor',
+      reason:       'Warning issued by moderator',
+      newStatus:    'warned',
       onlyIfStatus: ['active'],
     );
   }
 
-  /// Mute — minor infraction, cannot post/comment until [duration] elapses.
   Future<void> muteUser(String uid, Duration duration) async {
     await _applyInfraction(
-      uid:              uid,
-      severity:         'minor',
-      reason:           'Muted for ${_durationLabel(duration)}',
-      newStatus:        'muted',
+      uid:               uid,
+      severity:          'minor',
+      reason:            'Muted for ${_durationLabel(duration)}',
+      newStatus:         'muted',
       restrictionEndsAt: DateTime.now().add(duration),
     );
   }
 
-  /// Suspend — major infraction, full account suspension.
   Future<void> suspendUser(String uid, Duration duration) async {
     await _applyInfraction(
-      uid:              uid,
-      severity:         'major',
-      reason:           'Suspended for ${_durationLabel(duration)}',
-      newStatus:        'suspended',
+      uid:               uid,
+      severity:          'major',
+      reason:            'Suspended for ${_durationLabel(duration)}',
+      newStatus:         'suspended',
       restrictionEndsAt: DateTime.now().add(duration),
     );
   }
 
-  /// Permanent ban — major infraction.
   Future<void> banUser(String uid) async {
     await _applyInfraction(
-      uid:      uid,
-      severity: 'major',
-      reason:   'Permanently banned',
+      uid:       uid,
+      severity:  'major',
+      reason:    'Permanently banned',
       newStatus: 'banned',
     );
   }
 
-  /// Toggle shadow ban. Shadow-banned users can post normally but their
-  /// content is invisible to everyone else.
-  /// Also stamps/clears [authorShadowBanned] on all of the user's posts
-  /// so [postsStream] can filter them without a per-post user fetch.
   Future<void> shadowBanUser(String uid, {required bool enable}) async {
     final userUpdate = <String, dynamic>{'shadowBanned': enable};
     if (enable) {
@@ -362,12 +317,8 @@ class ForumService {
     }
     await _users.doc(uid).set(userUpdate, SetOptions(merge: true));
 
-    // Stamp all of this user's posts so the feed filter works immediately.
-    final userPosts = await _posts
-        .where('authorUid', isEqualTo: uid)
-        .get();
+    final userPosts = await _posts.where('authorUid', isEqualTo: uid).get();
     if (userPosts.docs.isEmpty) return;
-    // Firestore batch limit is 500 writes
     for (int i = 0; i < userPosts.docs.length; i += 500) {
       final batch = _db.batch();
       final chunk = userPosts.docs.skip(i).take(500);
@@ -378,7 +329,6 @@ class ForumService {
     }
   }
 
-  /// Restore — clear all restrictions, set status back to active.
   Future<void> restoreUser(String uid) async {
     await _users.doc(uid).set({
       'status':            'active',
@@ -389,15 +339,12 @@ class ForumService {
 
   // ── Private helpers ───────────────────────────────────────────────────────
 
-  /// Shared logic for every punitive action. Uses [set + merge] so fields
-  /// are created on documents that pre-date the moderation system.
   Future<void> _applyInfraction({
     required String  uid,
     required String  severity,
     required String  reason,
     required String  newStatus,
     DateTime?        restrictionEndsAt,
-    /// If provided, only change status when current status is in this list.
     List<String>?    onlyIfStatus,
   }) async {
     final entry = {
@@ -406,18 +353,15 @@ class ForumService {
       'createdAt': Timestamp.fromDate(DateTime.now()),
     };
 
-    final isMajor = severity == 'major';
-    final counterField =
-        isMajor ? 'majorInfractions' : 'minorInfractions';
+    final isMajor      = severity == 'major';
+    final counterField = isMajor ? 'majorInfractions' : 'minorInfractions';
 
-    // If onlyIfStatus is set we need to read first and conditionally write.
     if (onlyIfStatus != null) {
-      final snap = await _users.doc(uid).get();
+      final snap    = await _users.doc(uid).get();
       final current = snap.exists
           ? (snap.data() as Map<String, dynamic>)['status'] as String? ?? 'active'
           : 'active';
       if (!onlyIfStatus.contains(current)) {
-        // Status is already at a worse level — just log the infraction.
         await _users.doc(uid).set({
           counterField:        FieldValue.increment(1),
           'infractionHistory': FieldValue.arrayUnion([entry]),
@@ -435,12 +379,11 @@ class ForumService {
       update['restrictionEndsAt'] = Timestamp.fromDate(restrictionEndsAt);
     }
 
-    // set + merge so this works even on users without these fields yet
     await _users.doc(uid).set(update, SetOptions(merge: true));
   }
 
   String _durationLabel(Duration d) {
-    if (d.inDays >= 1)  return '${d.inDays} day${d.inDays == 1 ? '' : 's'}';
+    if (d.inDays  >= 1) return '${d.inDays} day${d.inDays == 1 ? '' : 's'}';
     if (d.inHours >= 1) return '${d.inHours} hour${d.inHours == 1 ? '' : 's'}';
     return '${d.inMinutes} minutes';
   }

@@ -9,6 +9,7 @@ import '../dsp/dsp_engine.dart';
 import 'chord_voicings.dart';
 import 'chord_diagram_widget.dart';
 import '../ui/user_home_page.dart';
+import '../services/mastery_service.dart';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Detection state
@@ -57,6 +58,55 @@ class _ChordDetailPageState extends State<ChordDetailPage>
   // ── Live badge ─────────────────────────────────────────────────────────────
   late final AnimationController _liveCtrl;
 
+  int  _hitCount        = 0;
+  bool _justMastered    = false;
+  bool _hitRecordedThisSession = false;
+
+  Widget _buildMasteryBanner() {
+    final mastered = MasteryService.isMastered(_hitCount);
+    if (!mastered) return const SizedBox.shrink();
+
+    return AnimatedOpacity(
+      opacity: mastered ? 1.0 : 0.0,
+      duration: const Duration(milliseconds: 400),
+      child: Container(
+        margin: const EdgeInsets.fromLTRB(20, 0, 20, 12),
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+        decoration: BoxDecoration(
+          color: Colors.amber.withOpacity(0.09),
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: Colors.amber.withOpacity(0.35)),
+        ),
+        child: Row(
+          children: [
+            const Icon(Icons.emoji_events_rounded,
+                size: 16, color: Colors.amber),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Text(
+                _justMastered
+                    ? 'Mastery achieved! Keep it up 🎸'
+                    : 'Mastery achieved',
+                style: const TextStyle(
+                  fontSize: 13,
+                  fontWeight: FontWeight.w600,
+                  color: Colors.amber,
+                ),
+              ),
+            ),
+            Text(
+              '${_hitCount} solid hits',
+              style: TextStyle(
+                fontSize: 11,
+                color: Colors.amber.withOpacity(0.6),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   @override
   void initState() {
     super.initState();
@@ -77,6 +127,9 @@ class _ChordDetailPageState extends State<ChordDetailPage>
     )..repeat(reverse: true);
 
     _initChime();
+    MasteryService.getHitCount(widget.chord.mlLabel).then((count) {
+      if (mounted) setState(() => _hitCount = count);
+    });
   }
 
   @override
@@ -134,19 +187,34 @@ class _ChordDetailPageState extends State<ChordDetailPage>
 
   Future<void> _toggleListen() async {
     if (_isListening) {
+      // Stopping — record a hit if the user got it correct at least once
+       if (_hitRecordedThisSession) {
+        MasteryService.recordHit(widget.chord.mlLabel).then((newCount) {
+          if (!mounted) return;
+          setState(() {
+            _justMastered = !MasteryService.isMastered(_hitCount) &&
+                            MasteryService.isMastered(newCount);
+            _hitCount = newCount;
+          });
+        });
+      }
+
       await _audio.stop();
       if (mounted) {
         setState(() {
-          _isListening   = false;
-          _state         = _FeedbackState.idle;
-          _detectedLabel = '—';
-          _confidence    = 0;
-          _correctStreak = 0;
+          _isListening          = false;
+          _state                = _FeedbackState.idle;
+          _detectedLabel        = '—';
+          _confidence           = 0;
+          _correctStreak        = 0;
+          _hitRecordedThisSession = false;
         });
       }
       return;
     }
 
+    // Starting — reset session flag
+    _hitRecordedThisSession = false;
     _audio.resetDSP();
     final ok = await _audio.startWithDSP(_onDSP);
     if (!mounted) return;
@@ -205,13 +273,10 @@ class _ChordDetailPageState extends State<ChordDetailPage>
     final bool solidHit = _correctStreak >= _streakThreshold;
 
     if (solidHit && _state != _FeedbackState.correct) {
-      // Correct feedback: haptic + chime + pulse
-      HapticFeedback.mediumImpact();
-      _playChime();
-      _pulseCtrl.repeat(reverse: true);
-    } else if (!solidHit && _state == _FeedbackState.correct) {
-      _pulseCtrl.stop();
-      _pulseCtrl.reset();
+    HapticFeedback.mediumImpact();
+    _playChime();
+    _pulseCtrl.repeat(reverse: true);
+    _hitRecordedThisSession = true; 
     }
 
     if (mounted) {
@@ -355,6 +420,7 @@ class _ChordDetailPageState extends State<ChordDetailPage>
 
             const Spacer(),
 
+            _buildMasteryBanner(),
             // ── Tip from current voicing ─────────────────────────────
             if (widget.chord.voicings[_currentPage].data.tips.isNotEmpty)
               Padding(
@@ -710,3 +776,4 @@ class _LiveBadge extends StatelessWidget {
     ]);
   }
 }
+

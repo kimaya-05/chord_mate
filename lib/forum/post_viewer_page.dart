@@ -29,9 +29,13 @@ class _PostViewerPageState extends State<PostViewerPage> {
   bool  _hasReported = false;
   bool  _submittingComment = false;
 
+  // Local copy of the post so edits reflect immediately without a reload
+  late ForumPost _post;
+
   @override
   void initState() {
     super.initState();
+    _post = widget.post;
     _loadUserData();
   }
 
@@ -46,8 +50,8 @@ class _PostViewerPageState extends State<PostViewerPage> {
   Future<void> _loadUserData() async {
     final uid = context.read<AuthProvider>().appUser?.uid;
     if (uid == null) return;
-    final rating   = await _service.getUserRating(widget.post.id, uid);
-    final reported = await _service.hasUserReported(widget.post.id, uid);
+    final rating   = await _service.getUserRating(_post.id, uid);
+    final reported = await _service.hasUserReported(_post.id, uid);
     if (mounted) setState(() {
       _myRating    = rating;
       _hasReported = reported;
@@ -87,7 +91,7 @@ class _PostViewerPageState extends State<PostViewerPage> {
   Future<void> _submitRating(int stars) async {
     final uid = context.read<AuthProvider>().appUser?.uid;
     if (uid == null) return;
-    await _service.ratePost(widget.post.id, uid, stars);
+    await _service.ratePost(_post.id, uid, stars);
     if (mounted) setState(() => _myRating = stars);
   }
 
@@ -142,7 +146,7 @@ class _PostViewerPageState extends State<PostViewerPage> {
     final auth = context.read<AuthProvider>();
     if (auth.appUser == null) return;
     await _service.reportPost(
-      post:         widget.post,
+      post:         _post,
       reporterUid:  auth.appUser!.uid,
       reporterName: auth.appUser!.displayName,
       reason:       reason,
@@ -153,6 +157,138 @@ class _PostViewerPageState extends State<PostViewerPage> {
         const SnackBar(content: Text('Post reported. Thank you.')),
       );
     }
+  }
+
+  // ── Edit ─────────────────────────────────────────────────────────────────────
+
+  void _showEditSheet() {
+    final titleCtrl   = TextEditingController(text: _post.title);
+    final artistCtrl  = TextEditingController(text: _post.artist);
+    final contentCtrl = TextEditingController(text: _post.content);
+    bool saving = false;
+
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: const Color(0xFF13131A),
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (ctx) {
+        return StatefulBuilder(
+          builder: (ctx, setSheetState) {
+            return Padding(
+              padding: EdgeInsets.only(
+                left: 20,
+                right: 20,
+                top: 24,
+                bottom: MediaQuery.of(ctx).viewInsets.bottom + 24,
+              ),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  // Header
+                  Row(
+                    children: [
+                      const Text(
+                        'Edit post',
+                        style: TextStyle(
+                            color: Colors.white,
+                            fontSize: 16,
+                            fontWeight: FontWeight.w700),
+                      ),
+                      const Spacer(),
+                      IconButton(
+                        icon: const Icon(Icons.close,
+                            color: Colors.white38, size: 20),
+                        onPressed: () => Navigator.pop(ctx),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 16),
+
+                  // Title field
+                  _EditField(
+                    controller: titleCtrl,
+                    label: 'Title',
+                    maxLines: 1,
+                  ),
+                  const SizedBox(height: 12),
+
+                  // Artist field
+                  _EditField(
+                    controller: artistCtrl,
+                    label: 'Artist',
+                    maxLines: 1,
+                  ),
+                  const SizedBox(height: 12),
+
+                  // Content field
+                  _EditField(
+                    controller: contentCtrl,
+                    label: 'Chord sheet content',
+                    maxLines: 10,
+                  ),
+                  const SizedBox(height: 20),
+
+                  // Save button
+                  SizedBox(
+                    width: double.infinity,
+                    child: ElevatedButton(
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: Colors.greenAccent,
+                        foregroundColor: Colors.black,
+                        padding: const EdgeInsets.symmetric(vertical: 14),
+                        shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(12)),
+                      ),
+                      onPressed: saving
+                          ? null
+                          : () async {
+                              setSheetState(() => saving = true);
+                              try {
+                                final updated = _post.copyWith(
+                                  title:   titleCtrl.text.trim(),
+                                  artist:  artistCtrl.text.trim(),
+                                  content: contentCtrl.text,
+                                );
+                                await _service.updatePost(updated);
+                                if (mounted) {
+                                  setState(() => _post = updated);
+                                  Navigator.pop(ctx);
+                                  ScaffoldMessenger.of(context).showSnackBar(
+                                    const SnackBar(
+                                        content: Text('Post updated!')),
+                                  );
+                                }
+                              } finally {
+                                if (ctx.mounted) {
+                                  setSheetState(() => saving = false);
+                                }
+                              }
+                            },
+                      child: saving
+                          ? const SizedBox(
+                              height: 18,
+                              width: 18,
+                              child: CircularProgressIndicator(
+                                  strokeWidth: 2,
+                                  color: Colors.black54),
+                            )
+                          : const Text('Save changes',
+                              style: TextStyle(
+                                  fontWeight: FontWeight.w700,
+                                  fontSize: 14)),
+                    ),
+                  ),
+                ],
+              ),
+            );
+          },
+        );
+      },
+    );
   }
 
   // ── Comment ─────────────────────────────────────────────────────────────────
@@ -166,7 +302,7 @@ class _PostViewerPageState extends State<PostViewerPage> {
     setState(() => _submittingComment = true);
     try {
       await _service.addComment(
-        widget.post.id,
+        _post.id,
         ForumComment(
           id:         '',
           authorUid:  auth.appUser!.uid,
@@ -185,6 +321,9 @@ class _PostViewerPageState extends State<PostViewerPage> {
 
   @override
   Widget build(BuildContext context) {
+    final uid = context.read<AuthProvider>().appUser?.uid;
+    final isAuthor = uid != null && uid == _post.authorUid;
+
     return Scaffold(
       backgroundColor: const Color(0xFF0A0A0F),
       appBar: AppBar(
@@ -198,20 +337,28 @@ class _PostViewerPageState extends State<PostViewerPage> {
         title: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(widget.post.title,
+            Text(_post.title,
                 style: const TextStyle(
                     fontSize: 16,
                     fontWeight: FontWeight.w700,
                     color: Colors.white),
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis),
-            Text(widget.post.artist,
+            Text(_post.artist,
                 style: TextStyle(
                     fontSize: 12,
                     color: Colors.white.withOpacity(0.4))),
           ],
         ),
         actions: [
+          // Edit — only shown to the post's author
+          if (isAuthor)
+            IconButton(
+              icon: const Icon(Icons.edit_outlined,
+                  color: Colors.white54, size: 20),
+              tooltip: 'Edit post',
+              onPressed: _showEditSheet,
+            ),
           IconButton(
             icon: Icon(Icons.flag_outlined,
                 color: _hasReported
@@ -234,29 +381,40 @@ class _PostViewerPageState extends State<PostViewerPage> {
             child: SingleChildScrollView(
               controller: _scrollCtrl,
               padding: const EdgeInsets.all(20),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  // Post metadata
-                  _buildMetaRow(),
-                  const SizedBox(height: 20),
+              // Prevent horizontal overflow — content must wrap, not scroll sideways
+              child: ConstrainedBox(
+                constraints: BoxConstraints(
+                  maxWidth: MediaQuery.of(context).size.width - 40,
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    // Post metadata
+                    _buildMetaRow(),
+                    const SizedBox(height: 20),
 
-                  // Chord sheet
-                  ChordSheetRenderer(
-                    content:             widget.post.content,
-                    transposeSemitones:  _transposeSemitones,
-                    showInlineDiagrams:  false,
-                  ),
-                  const SizedBox(height: 32),
+                    // Chord sheet — clipped to available width; renderer must wrap
+                    ClipRect(
+                      child: ChordSheetRenderer(
+                        content:            _post.content,
+                        transposeSemitones: _transposeSemitones,
+                        showInlineDiagrams: false,
+                        // If ChordSheetRenderer accepts a softWrap / maxWidth
+                        // parameter, pass it here. The ConstrainedBox above
+                        // already enforces the layout width.
+                      ),
+                    ),
+                    const SizedBox(height: 32),
 
-                  // Rating
-                  _buildRatingSection(),
-                  const SizedBox(height: 32),
+                    // Rating
+                    _buildRatingSection(),
+                    const SizedBox(height: 32),
 
-                  // Comments
-                  _buildCommentsSection(),
-                  const SizedBox(height: 80),
-                ],
+                    // Comments
+                    _buildCommentsSection(),
+                    const SizedBox(height: 80),
+                  ],
+                ),
               ),
             ),
           ),
@@ -380,12 +538,12 @@ class _PostViewerPageState extends State<PostViewerPage> {
       spacing: 8,
       runSpacing: 8,
       children: [
-        _MetaChip(widget.post.key,        Colors.greenAccent),
-        _MetaChip(widget.post.difficulty, _difficultyColor(widget.post.difficulty)),
-        _MetaChip(widget.post.genre,      Colors.white38),
-        if (widget.post.capo > 0)
-          _MetaChip(widget.post.capoLabel, const Color(0xFF7E8CE0)),
-        _MetaChip('by ${widget.post.authorName}', Colors.white24),
+        _MetaChip(_post.key,        Colors.greenAccent),
+        _MetaChip(_post.difficulty, _difficultyColor(_post.difficulty)),
+        _MetaChip(_post.genre,      Colors.white38),
+        if (_post.capo > 0)
+          _MetaChip(_post.capoLabel, const Color(0xFF7E8CE0)),
+        _MetaChip('by ${_post.authorName}', Colors.white24),
       ],
     );
   }
@@ -416,9 +574,9 @@ class _PostViewerPageState extends State<PostViewerPage> {
             const Icon(Icons.star_rounded, color: Colors.amber, size: 16),
             const SizedBox(width: 6),
             Text(
-              widget.post.ratingCount == 0
+              _post.ratingCount == 0
                   ? 'No ratings yet'
-                  : '${widget.post.averageRating.toStringAsFixed(1)} / 5  (${widget.post.ratingCount} ${widget.post.ratingCount == 1 ? 'rating' : 'ratings'})',
+                  : '${_post.averageRating.toStringAsFixed(1)} / 5  (${_post.ratingCount} ${_post.ratingCount == 1 ? 'rating' : 'ratings'})',
               style: const TextStyle(
                   color: Colors.amber,
                   fontWeight: FontWeight.w600,
@@ -467,7 +625,7 @@ class _PostViewerPageState extends State<PostViewerPage> {
                 letterSpacing: 1.4)),
         const SizedBox(height: 12),
         StreamBuilder<List<ForumComment>>(
-          stream: _service.commentsStream(widget.post.id),
+          stream: _service.commentsStream(_post.id),
           builder: (context, snapshot) {
             if (snapshot.connectionState == ConnectionState.waiting) {
               return const Center(
@@ -490,7 +648,7 @@ class _PostViewerPageState extends State<PostViewerPage> {
                             .appUser
                             ?.uid,
                         onDelete: () => _service.deleteComment(
-                            widget.post.id, c.id),
+                            _post.id, c.id),
                       ))
                   .toList(),
             );
@@ -543,6 +701,56 @@ class _PostViewerPageState extends State<PostViewerPage> {
                 ),
         ],
       ),
+    );
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// _EditField — reusable text field for the edit sheet
+// ─────────────────────────────────────────────────────────────────────────────
+
+class _EditField extends StatelessWidget {
+  final TextEditingController controller;
+  final String label;
+  final int    maxLines;
+
+  const _EditField({
+    required this.controller,
+    required this.label,
+    this.maxLines = 1,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(label,
+            style: TextStyle(
+                fontSize: 11,
+                fontWeight: FontWeight.w600,
+                color: Colors.white.withOpacity(0.4),
+                letterSpacing: 0.8)),
+        const SizedBox(height: 6),
+        Container(
+          decoration: BoxDecoration(
+            color: const Color(0xFF0A0A0F),
+            borderRadius: BorderRadius.circular(10),
+            border: Border.all(color: Colors.white.withOpacity(0.1)),
+          ),
+          child: TextField(
+            controller: controller,
+            maxLines: maxLines,
+            style: const TextStyle(
+                color: Colors.white, fontSize: 13, height: 1.5),
+            decoration: const InputDecoration(
+              contentPadding:
+                  EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+              border: InputBorder.none,
+            ),
+          ),
+        ),
+      ],
     );
   }
 }

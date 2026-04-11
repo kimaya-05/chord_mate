@@ -1,7 +1,7 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-
+import '../services/pb_service.dart';
 import '../chords/chord_library.dart';
 import '../services/audio_service.dart';
 import 'results_screen.dart';
@@ -224,16 +224,41 @@ class DrillScreenState extends State<DrillScreen>
     }
   }
  
-  void _stopDrill() {
+  Future<void> _stopDrill() async {
     _beatTimer?.cancel();
     _sampleTimer?.cancel();
     _countdownTimer?.cancel();
     _audio.stop();
- 
+
     if (!mounted) return;
     setState(() => _isRunning = false);
- 
+
+    // Save personal best if this session was better
+    final newPb = await PbService.saveIfBetter(
+      labelA: widget.chordA.mlLabel,
+      labelB: widget.chordB.mlLabel,
+      correct: _correct,
+      total: _total,
+    );
+
+    if (!mounted) return;
+
+    if (newPb != null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            'New personal best!  ${newPb.correct}/${newPb.total}'
+            '  •  ${(newPb.accuracy * 100).toStringAsFixed(0)}%',
+          ),
+          backgroundColor: Colors.amber.shade800,
+          behavior: SnackBarBehavior.floating,
+          duration: const Duration(seconds: 3),
+        ),
+      );
+    }
+
     Navigator.of(context).pushReplacement(MaterialPageRoute(
+      settings: const RouteSettings(name: '/transition-drill'),
       builder: (_) => ResultsScreen(
         chordA: widget.chordA,
         chordB: widget.chordB,

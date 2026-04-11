@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'chord_voicings.dart';
 import 'chord_detail_page.dart';
+import '../services/mastery_service.dart';
 
 class ChordListPage extends StatelessWidget {
   const ChordListPage({super.key});
@@ -57,29 +58,52 @@ class ChordListPage extends StatelessWidget {
   }
 }
 
-class _ChordTile extends StatelessWidget {
+class _ChordTile extends StatefulWidget {
   final PracticeChord chord;
-
   const _ChordTile({required this.chord});
+
+  @override
+  State<_ChordTile> createState() => _ChordTileState();
+}
+
+class _ChordTileState extends State<_ChordTile> {
+  bool _mastered = false;
+
+  @override
+  void initState() {
+    super.initState();
+    MasteryService.getHitCount(widget.chord.mlLabel).then((count) {
+      if (mounted) setState(() => _mastered = MasteryService.isMastered(count));
+    });
+  }
 
   @override
   Widget build(BuildContext context) {
     final Color accent =
-        chord.isMinor ? const Color(0xFF7E8CE0) : Colors.greenAccent;
+        widget.chord.isMinor ? const Color(0xFF7E8CE0) : Colors.greenAccent;
 
     return GestureDetector(
       onTap: () => Navigator.push(
         context,
         MaterialPageRoute(
-          builder: (_) => ChordDetailPage(chord: chord),
+          builder: (_) => ChordDetailPage(chord: widget.chord),
         ),
-      ),
+      ).then((_) {
+        // Refresh mastery when returning from detail page
+        MasteryService.getHitCount(widget.chord.mlLabel).then((count) {
+          if (mounted) setState(() => _mastered = MasteryService.isMastered(count));
+        });
+      }),
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
         decoration: BoxDecoration(
           color: const Color(0xFF13131A),
           borderRadius: BorderRadius.circular(16),
-          border: Border.all(color: Colors.white.withOpacity(0.07)),
+          border: Border.all(
+            color: _mastered
+                ? Colors.amber.withOpacity(0.35)
+                : Colors.white.withOpacity(0.07),
+          ),
         ),
         child: Row(
           children: [
@@ -94,9 +118,9 @@ class _ChordTile extends StatelessWidget {
               ),
               child: Center(
                 child: Text(
-                  chord.displayName,
+                  widget.chord.displayName,
                   style: TextStyle(
-                    fontSize: chord.displayName.length > 2 ? 16 : 20,
+                    fontSize: widget.chord.displayName.length > 2 ? 16 : 20,
                     fontWeight: FontWeight.w800,
                     color: accent,
                     letterSpacing: -0.5,
@@ -112,7 +136,7 @@ class _ChordTile extends StatelessWidget {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(
-                    chord.fullName,
+                    widget.chord.fullName,
                     style: const TextStyle(
                       fontSize: 16,
                       fontWeight: FontWeight.w600,
@@ -120,27 +144,46 @@ class _ChordTile extends StatelessWidget {
                     ),
                   ),
                   const SizedBox(height: 3),
-                  Text(
-                    '${chord.voicings.length} voicing${chord.voicings.length > 1 ? 's' : ''}',
-                    style: TextStyle(
-                      fontSize: 12,
-                      color: Colors.white.withOpacity(0.35),
+                  if (_mastered) ...[
+                    Row(
+                      children: [
+                        const Icon(Icons.emoji_events_rounded,
+                            size: 11, color: Colors.amber),
+                        const SizedBox(width: 4),
+                        const Text(
+                          'Mastery achieved',
+                          style: TextStyle(
+                            fontSize: 11,
+                            fontWeight: FontWeight.w600,
+                            color: Colors.amber,
+                          ),
+                        ),
+                      ],
                     ),
-                  ),
+                  ] else ...[
+                    Text(
+                      '${widget.chord.voicings.length} voicing${widget.chord.voicings.length > 1 ? 's' : ''}',
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: Colors.white.withOpacity(0.35),
+                      ),
+                    ),
+                  ],
                 ],
               ),
             ),
 
             // Major / Minor chip
             Container(
-              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+              padding:
+                  const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
               decoration: BoxDecoration(
                 color: accent.withOpacity(0.08),
                 borderRadius: BorderRadius.circular(20),
                 border: Border.all(color: accent.withOpacity(0.25)),
               ),
               child: Text(
-                chord.isMinor ? 'Minor' : 'Major',
+                widget.chord.isMinor ? 'Minor' : 'Major',
                 style: TextStyle(
                   fontSize: 11,
                   fontWeight: FontWeight.w600,
