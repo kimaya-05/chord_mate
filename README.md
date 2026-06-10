@@ -1,6 +1,6 @@
 # ChordMate 
 
-ChordMate is a multifunctional, self-guided mobile application designed to help beginners master the guitar through interactive, real-time tools and community support. 
+ChordMate is a multifunctional, self-guided mobile application designed to help beginners learn the guitar through interactive, real-time tools and community support. 
 
 ## Features
 
@@ -10,10 +10,9 @@ ChordMate is a multifunctional, self-guided mobile application designed to help 
 
 ## Tech Stack
 
-- **Frontend & App Logic:** Flutter / Dart
-- **State Management:** Provider / Riverpod *(Specify whichever you used)*
-- **Audio Processing:** *(Optional: Insert any specific audio plugin used, e.g., flutter_sound or pitch_detector)*
-- **Backend/Database:** *(Optional: e.g., Firebase Auth & Firestore for the forum)*
+- **Frontend & App Logic:** Flutter & Dart
+- **Chord classification model:** TFLite
+- **Backend/Database:** Firebase Auth and Firestore
 
 ## Architecture & Highlights
 Building ChordMate required balancing real-time device microphone inputs with a smooth UI layout. Implementing the community feature structured my understanding of relational data flows, user authentication, and state management in cross-platform mobile environments.
