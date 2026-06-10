@@ -13,6 +13,3 @@ ChordMate is a multifunctional, self-guided mobile application designed to help 
 - **Frontend & App Logic:** Flutter & Dart
 - **Chord classification model:** TFLite
 - **Backend/Database:** Firebase Auth and Firestore
-
-## Architecture & Highlights
-Building ChordMate required balancing real-time device microphone inputs with a smooth UI layout. Implementing the community feature structured my understanding of relational data flows, user authentication, and state management in cross-platform mobile environments.
